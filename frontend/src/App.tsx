@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import ChatMessage from './components/ChatMessage'
 import ChatInput from './components/ChatInput'
+import LandingPage from './components/LandingPage'
 import './App.css'
 import axios from 'axios'
 import type { Message, ChatResponse, Market } from './types'
@@ -31,6 +32,7 @@ function App() {
   const [isLoading, setIsLoading] = useState<boolean>(false)
   const [trendingMarkets, setTrendingMarkets] = useState<Market[]>([])
   const [language, setLanguage] = useState<'en' | 'zh'>('en')
+  const [showLanding, setShowLanding] = useState<boolean>(true)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   
   // Translation function
@@ -288,6 +290,16 @@ function App() {
       allFields: Object.keys(marketData)
     })
     return 'https://polymarket.com'
+  }
+
+  // Show landing page if not entered yet
+  if (showLanding) {
+    return (
+      <LandingPage 
+        onEnter={() => setShowLanding(false)} 
+        language={language}
+      />
+    )
   }
 
   return (
