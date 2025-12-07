@@ -31,7 +31,6 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Polymarket Insights Chatbot API", lifespan=lifespan)
 
 # CORS middleware for React frontend
-# In production, add your Vercel domain to allow_origins
 allowed_origins = [
     "http://localhost:3000",
     "http://localhost:5173",
@@ -46,6 +45,12 @@ if production_frontend:
     # Also add without protocol in case
     if production_frontend.startswith('https://'):
         allowed_origins.append(production_frontend.replace('https://', 'http://'))
+    
+    # Also add the Railway domain if custom domain is set (Railway domain still works)
+    railway_domain = os.getenv("RAILWAY_PUBLIC_DOMAIN")
+    if railway_domain:
+        allowed_origins.append(f"https://{railway_domain}")
+        allowed_origins.append(f"http://{railway_domain}")
 
 app.add_middleware(
     CORSMiddleware,
