@@ -133,14 +133,25 @@ class PolymarketClient:
         """Search for markets by query string. Tries multiple search strategies."""
         try:
             from datetime import datetime, timedelta
+            import re
             
             url = f"{self.api_url}/markets"
             current_date = datetime.now()
             min_end_date = (current_date + timedelta(days=1)).isoformat() + 'Z'
             
-            # Strategy 1: Try API search parameter
+            # Extract key terms from query for multiple search strategies
+            query_lower = query.lower()
+            # Extract important keywords (remove stop words, keep meaningful terms)
+            words = re.findall(r'\b\w+\b', query_lower)
+            stop_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 
+                         'will', 'be', 'is', 'are', 'was', 'were', 'have', 'has', 'had', 'do', 'does', 'did', 
+                         'can', 'could', 'should', 'would', 'may', 'might', 'must', 'what', 'when', 'where', 
+                         'who', 'why', 'how', 'does', 'doesn', 'don', 'doesnt', 'dont'}
+            key_terms = [w for w in words if w not in stop_words and len(w) > 2]
+            
+            # Strategy 1: Try API search parameter with full query
             params = {
-                "limit": limit * 3,  # Fetch more to filter
+                "limit": limit * 5,  # Fetch more to filter
                 "q": query,
                 "active": "true",
                 "closed": "false",
@@ -157,13 +168,62 @@ class PolymarketClient:
                 if markets and len(markets) > 0:
                     # Filter and sort by relevance
                     filtered = self._filter_markets_by_relevance(markets, query)
-                    return filtered[:limit]
+                    if filtered:
+                        return filtered[:limit]
             except Exception as e:
                 print(f"API search with 'q' parameter failed: {e}")
             
-            # Strategy 2: Fetch all active markets and filter by keywords
+            # Strategy 2: Try with key terms only (if query is long)
+            if len(key_terms) > 2:
+                key_query = ' '.join(key_terms[:5])  # Use top 5 key terms
+                params = {
+                    "limit": limit * 5,
+                    "q": key_query,
+                    "active": "true",
+                    "closed": "false",
+                    "end_date_min": min_end_date,
+                    "order": "volumeNum",
+                    "ascending": "false"
+                }
+                
+                try:
+                    response = await self.client.get(url, params=params)
+                    response.raise_for_status()
+                    markets = response.json()
+                    
+                    if markets and len(markets) > 0:
+                        filtered = self._filter_markets_by_relevance(markets, query)
+                        if filtered:
+                            return filtered[:limit]
+                except Exception as e:
+                    print(f"API search with key terms failed: {e}")
+            
+            # Strategy 3: Fetch many active markets and filter by keywords (no date filter first)
+            # This ensures we don't miss markets due to date filtering
             params = {
-                "limit": limit * 10,  # Fetch many markets
+                "limit": limit * 20,  # Fetch many markets
+                "active": "true",
+                "closed": "false",
+                "order": "volumeNum",
+                "ascending": "false"
+            }
+            
+            try:
+                response = await self.client.get(url, params=params)
+                response.raise_for_status()
+                all_markets = response.json()
+                
+                if all_markets:
+                    # Filter by relevance to query
+                    filtered = self._filter_markets_by_relevance(all_markets, query)
+                    if filtered:
+                        return filtered[:limit]
+            except Exception as e:
+                print(f"Fetching all markets failed: {e}")
+            
+            # Strategy 4: Try with date filter but larger limit
+            params = {
+                "limit": limit * 20,
                 "active": "true",
                 "closed": "false",
                 "end_date_min": min_end_date,
@@ -171,14 +231,17 @@ class PolymarketClient:
                 "ascending": "false"
             }
             
-            response = await self.client.get(url, params=params)
-            response.raise_for_status()
-            all_markets = response.json()
-            
-            if all_markets:
-                # Filter by relevance to query
-                filtered = self._filter_markets_by_relevance(all_markets, query)
-                return filtered[:limit]
+            try:
+                response = await self.client.get(url, params=params)
+                response.raise_for_status()
+                all_markets = response.json()
+                
+                if all_markets:
+                    filtered = self._filter_markets_by_relevance(all_markets, query)
+                    if filtered:
+                        return filtered[:limit]
+            except Exception as e:
+                print(f"Fetching markets with date filter failed: {e}")
             
             return []
         except Exception as e:
@@ -195,8 +258,24 @@ class PolymarketClient:
         query_lower = query.lower()
         query_words = set(re.findall(r'\b\w+\b', query_lower))
         # Remove common stop words
-        stop_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'will', 'be', 'is', 'are', 'was', 'were', 'have', 'has', 'had', 'do', 'does', 'did', 'can', 'could', 'should', 'would', 'may', 'might', 'must'}
+        stop_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 
+                     'will', 'be', 'is', 'are', 'was', 'were', 'have', 'has', 'had', 'do', 'does', 'did', 
+                     'can', 'could', 'should', 'would', 'may', 'might', 'must', 'what', 'when', 'where', 
+                     'who', 'why', 'how', 'does', 'doesn', 'don', 'doesnt', 'dont'}
         query_words = {w for w in query_words if w not in stop_words and len(w) > 2}
+        
+        # Extract important keywords (proper nouns, numbers, key terms)
+        important_terms = []
+        for word in query_words:
+            # Keep numbers (years, prices, etc.)
+            if word.isdigit() or (word.replace('.', '').isdigit()):
+                important_terms.append(word)
+            # Keep capitalized words (proper nouns)
+            elif word[0].isupper() if word else False:
+                important_terms.append(word.lower())
+            # Keep common important terms
+            elif word in ['bitcoin', 'btc', 'ethereum', 'eth', 'price', 'hit', 'reach', 'election', 'win', 'trump', 'biden']:
+                important_terms.append(word)
         
         scored_markets = []
         
@@ -208,33 +287,57 @@ class PolymarketClient:
             question = str(market.get('question', '') or '').lower()
             title = str(market.get('title', '') or market.get('name', '') or '').lower()
             description = str(market.get('description', '') or '').lower()
+            slug = str(market.get('slug', '') or '').lower()
             
             # Check for exact phrase matches (highest score)
             if query_lower in question or query_lower in title:
                 score += 100
             
+            # Check for partial phrase matches (e.g., "bitcoin 2025" matches "bitcoin hit in 2025")
+            query_phrases = []
+            words_list = list(query_words)
+            # Create 2-3 word phrases from query
+            for i in range(len(words_list) - 1):
+                phrase = f"{words_list[i]} {words_list[i+1]}"
+                query_phrases.append(phrase)
+            for i in range(len(words_list) - 2):
+                phrase = f"{words_list[i]} {words_list[i+1]} {words_list[i+2]}"
+                query_phrases.append(phrase)
+            
+            for phrase in query_phrases:
+                if phrase in question or phrase in title:
+                    score += 50
+            
             # Check for individual word matches
             question_words = set(re.findall(r'\b\w+\b', question))
             title_words = set(re.findall(r'\b\w+\b', title))
+            slug_words = set(re.findall(r'\b\w+\b', slug))
             
-            # Count matching words
+            # Count matching words (higher weight for important terms)
             matches = query_words.intersection(question_words)
             score += len(matches) * 10
             
             matches = query_words.intersection(title_words)
             score += len(matches) * 8
             
-            # Bonus for proper nouns (capitalized words) matching
-            query_proper = [w for w in query_words if w[0].isupper() or any(c.isupper() for c in w)]
-            if query_proper:
-                for word in query_proper:
-                    if word in question or word in title:
-                        score += 15
+            matches = query_words.intersection(slug_words)
+            score += len(matches) * 12  # Slug matches are very relevant
+            
+            # Extra bonus for important terms (proper nouns, numbers, key words)
+            for term in important_terms:
+                term_lower = term.lower()
+                if term_lower in question:
+                    score += 20
+                if term_lower in title:
+                    score += 18
+                if term_lower in slug:
+                    score += 25  # Slug matches are highly relevant
             
             # Bonus for volume (more popular markets are more likely to be what user wants)
             volume = float(market.get('volumeNum', 0) or market.get('volume', 0) or 0)
             if volume > 0:
-                score += min(volume / 1000000, 5)  # Cap at 5 points
+                # Higher volume = more relevant, but cap it
+                score += min(volume / 500000, 10)  # Cap at 10 points, scales with volume
             
             if score > 0:
                 market['_relevance_score'] = score
