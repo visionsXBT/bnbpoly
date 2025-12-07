@@ -172,11 +172,16 @@ function App() {
         content: msg.content
       }))
       
-      const response = await axios.post<ChatResponse>(`${API_BASE_URL}/api/chat`, {
+      const apiUrl = `${API_BASE_URL}/api/chat`
+      console.log('Sending request to:', apiUrl)
+      
+      const response = await axios.post<ChatResponse>(apiUrl, {
         message: message,
         search_query: message.toLowerCase().includes('search') ? message : null,
         conversation_history: conversationHistory,
         language: language
+      }, {
+        timeout: 60000 // 60 second timeout
       })
 
       const assistantMessage: Message = {
@@ -190,11 +195,22 @@ function App() {
       const errorPrefix = language === 'zh' ? '错误：' : 'Error: '
       let errorContent = t('error')
       
-      // Show more detailed error in development
+      // Show more detailed error
       if (axios.isAxiosError(error)) {
-        const errorDetail = error.response?.data?.detail || error.message
-        errorContent = `${errorPrefix}${errorDetail}`
-        console.error('Backend error details:', errorDetail)
+        if (error.code === 'ECONNABORTED') {
+          errorContent = `${errorPrefix}Request timeout. Please try again.`
+        } else if (error.response) {
+          // Server responded with error
+          const errorDetail = error.response.data?.detail || error.response.statusText || error.message
+          errorContent = `${errorPrefix}${errorDetail}`
+          console.error('Backend error details:', errorDetail, error.response.status)
+        } else if (error.request) {
+          // Request made but no response
+          errorContent = `${errorPrefix}No response from server. Check if backend is running and VITE_API_BASE_URL is set correctly.`
+          console.error('No response received:', error.request)
+        } else {
+          errorContent = `${errorPrefix}${error.message}`
+        }
       } else if (error instanceof Error) {
         errorContent = `${errorPrefix}${error.message}`
       }
