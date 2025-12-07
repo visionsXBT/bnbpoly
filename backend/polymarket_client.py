@@ -123,10 +123,17 @@ class PolymarketClient:
             url = f"{self.api_url}/markets/{market_id}/trades"
             params = {"limit": limit}
             response = await self.client.get(url, params=params)
+            
+            # Handle 404 gracefully - some markets don't have trades endpoint
+            if response.status_code == 404:
+                return []
+            
             response.raise_for_status()
             return response.json()
         except Exception as e:
-            print(f"Error fetching trades for market {market_id}: {e}")
+            # Log but don't fail - trades are optional
+            if "404" not in str(e):
+                print(f"Error fetching trades for market {market_id}: {e}")
             return []
     
     async def search_markets(self, query: str, limit: int = 20) -> List[Dict]:
