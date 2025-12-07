@@ -178,7 +178,10 @@ function App() {
         content: msg.content
       }))
       
-      const apiUrl = `${API_BASE_URL}/api/chat`
+      // Ensure no double slashes in URL
+      const baseUrl = API_BASE_URL.endsWith('/') ? API_BASE_URL.slice(0, -1) : API_BASE_URL
+      const apiUrl = `${baseUrl}/api/chat`
+      console.log('API_BASE_URL:', API_BASE_URL)
       console.log('Sending request to:', apiUrl)
       
       const response = await axios.post<ChatResponse>(apiUrl, {
