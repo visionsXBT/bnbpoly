@@ -153,7 +153,13 @@ async def chat(message: ChatMessage):
             # No URL provided - try to search for markets based on user's query
             # Extract keywords from the message to search
             search_results = await polymarket_client.search_markets(message.message, limit=5)
+            print(f"Search results for '{message.message}': {len(search_results) if search_results else 0} markets found")
             if search_results and len(search_results) > 0:
+                # Log what markets were found
+                for i, market in enumerate(search_results[:3], 1):
+                    market_title = market.get('question') or market.get('title') or market.get('name', 'N/A')
+                    print(f"  Market {i}: {market_title[:80]}")
+                
                 # If we found a single highly relevant market, use it as market_details
                 if len(search_results) == 1:
                     market_details = search_results[0]
@@ -166,8 +172,10 @@ async def chat(message: ChatMessage):
                     if search_results[0].get('id'):
                         trades = await polymarket_client.get_market_trades(search_results[0]['id'])
             else:
-                # Fallback: Get general market data if search found nothing
-                market_data = await polymarket_client.get_markets(limit=10)
+                # Only use fallback if search truly found nothing
+                print(f"No markets found for query: '{message.message}' - NOT using fallback to avoid irrelevant markets")
+                # Don't use fallback - it returns top volume markets which are often irrelevant
+                # market_data = await polymarket_client.get_markets(limit=10)
         
         # Convert conversation history to dict format if provided
         conv_history = None

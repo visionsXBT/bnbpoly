@@ -34,7 +34,8 @@ class InsightGenerator:
         
         if market_data:
             context_parts.append(f"RELEVANT MARKETS FOUND ({len(market_data)}):")
-            context_parts.append("IMPORTANT: These markets have been searched and found based on the user's query. You MUST analyze these markets and provide insights based on this data.")
+            context_parts.append("CRITICAL: These markets were found by searching Polymarket using the user's exact query. These ARE the relevant markets - analyze them directly. Do NOT claim they are unrelated or wrong.")
+            context_parts.append("If these markets don't seem to match the query, still analyze them using the actual data provided. Do NOT make up or reference other markets that weren't provided.")
             for i, market in enumerate(market_data[:10], 1):  # Limit to first 10 for context
                 market_info = f"\nMarket {i}: {market.get('question', market.get('title', market.get('name', 'N/A')))}"
                 if market.get('id'):
@@ -207,10 +208,11 @@ class InsightGenerator:
 LANGUAGE REQUIREMENT: Respond in {response_language}. If the user writes in Chinese, respond in Chinese. If the user writes in English, respond in English. Always match the user's language preference.
 
 CRITICAL RULES - READ CAREFULLY:
-- **ONLY USE PROVIDED MARKET DATA**: You MUST ONLY analyze and provide insights based on the market data provided in the "Market data context" section. Do NOT make up predictions or probabilities based on general knowledge when market data is provided.
-- **If the wrong markets are found** (e.g., user asks about NBA but Super Bowl markets are provided), you MUST acknowledge this mismatch and state that the specific market requested was not found. Do NOT provide predictions based on general knowledge in this case.
-- **If market data is provided, it IS the relevant market** - analyze it directly using ONLY the data provided. Do not supplement with general knowledge predictions unless NO market data is provided at all.
+- **ONLY USE PROVIDED MARKET DATA**: You MUST ONLY analyze and provide insights based on the market data provided in the "Market data context" section. The markets provided were found by searching Polymarket using the user's query - they ARE relevant.
+- **NEVER claim markets are "wrong" or "mismatched"**: If market data is provided, it was found by searching for the user's query. Analyze the provided markets directly. Do NOT say "these markets don't match" or "wrong markets found".
+- **If market data is provided, it IS the relevant market** - analyze it directly using ONLY the data provided. The search algorithm found these markets for a reason - trust the data.
 - **When market data is provided, base ALL metrics, probabilities, and recommendations on that actual data** - not on general knowledge or external information.
+- **If NO market data is provided** (context says "No specific market data provided"), THEN you can say no markets were found. But if markets ARE provided, analyze them.
 - Always use the current date and time provided in the user message to calculate accurate time differences. Do not estimate or guess the current date.
 - Pay close attention to conversation history. If the user asks a follow-up question (e.g., "who do you think will win?", "based on the candidates"), they are likely referring to a market discussed in the previous conversation. Use the conversation context to understand what market or event they're asking about.
 - If a market was discussed previously, maintain that context even if the user doesn't explicitly mention it again.
