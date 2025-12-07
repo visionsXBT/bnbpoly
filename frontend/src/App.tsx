@@ -326,7 +326,7 @@ function App() {
                 const marketUrl = getPolymarketUrl(market)
                 
                 // Debug: log first market to see structure
-                if (index === 0 && process.env.NODE_ENV === 'development') {
+                if (index === 0 && import.meta.env.DEV) {
                   console.log('Sample market data:', {
                     id: market.id,
                     slug: marketData.slug,

@@ -1,4 +1,4 @@
-import React, { useState, FormEvent, KeyboardEvent } from 'react'
+import { useState, FormEvent, KeyboardEvent } from 'react'
 import './ChatInput.css'
 
 interface ChatInputProps {
