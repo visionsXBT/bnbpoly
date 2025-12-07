@@ -200,9 +200,16 @@ class InsightGenerator:
         # If no market data provided, don't mention it - just provide intelligent analysis
         context = "\n".join(context_parts) if context_parts else ""
         
-        # Determine response language based on user query and language preference
-        is_chinese_query = language == 'zh' or any('\u4e00' <= char <= '\u9fff' for char in user_query)
-        response_language = 'Chinese (Simplified)' if is_chinese_query else 'English'
+        # Determine response language - prioritize explicit language preference over query detection
+        # Language preference from UI takes priority
+        if language == 'zh':
+            response_language = 'Chinese (Simplified)'
+        elif language == 'en':
+            response_language = 'English'
+        else:
+            # Fallback: detect from query if no explicit preference
+            is_chinese_query = any('\u4e00' <= char <= '\u9fff' for char in user_query)
+            response_language = 'Chinese (Simplified)' if is_chinese_query else 'English'
         
         system_prompt = f"""You are a professional prediction market analyst specializing in Polymarket. Provide structured, data-driven insights with intelligent predictions.
 

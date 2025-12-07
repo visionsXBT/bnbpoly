@@ -31,7 +31,24 @@ function App() {
   ])
   const [isLoading, setIsLoading] = useState<boolean>(false)
   const [trendingMarkets, setTrendingMarkets] = useState<Market[]>([])
-  const [language, setLanguage] = useState<'en' | 'zh'>('en')
+  // Load language preference from localStorage (per-user, client-side only)
+  const [language, setLanguage] = useState<'en' | 'zh'>(() => {
+    try {
+      const saved = localStorage.getItem('language')
+      return (saved === 'zh' || saved === 'en') ? saved : 'en'
+    } catch {
+      return 'en'
+    }
+  })
+  
+  // Persist language preference when it changes
+  useEffect(() => {
+    try {
+      localStorage.setItem('language', language)
+    } catch {
+      // Ignore localStorage errors
+    }
+  }, [language])
   // Check if user has already entered (persist across refreshes)
   const [showLanding, setShowLanding] = useState<boolean>(() => {
     // Check localStorage to see if user has already entered
