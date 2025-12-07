@@ -147,27 +147,39 @@ class PolymarketClient:
             
             # Use Polymarket's built-in search - trust their algorithm
             # The 'q' parameter searches across question, slug, and other fields
+            # When using 'q' parameter, don't order by volume - let search relevance determine order
             params = {
-                "limit": limit,  # Request exactly what we need
+                "limit": limit * 2,  # Request more to filter if needed
                 "q": query,  # Full user query - Polymarket handles the matching
                 "active": "true",
                 "closed": "false",
                 "end_date_min": min_end_date,  # Only future markets
-                "order": "volumeNum",  # Order by volume (most relevant first)
-                "ascending": "false"
+                # Don't use "order": "volumeNum" when searching - it overrides search relevance!
             }
             
             try:
+                print(f"Searching Polymarket API with query: '{query}'")
+                print(f"API URL: {url}")
+                print(f"Params: {params}")
                 response = await self.client.get(url, params=params)
                 response.raise_for_status()
                 markets = response.json()
                 
                 if markets and len(markets) > 0:
                     print(f"Polymarket API search returned {len(markets)} markets for query: '{query}'")
-                    # Return results directly - Polymarket's search should be accurate
+                    # Log first few market titles to debug
+                    for i, market in enumerate(markets[:3], 1):
+                        title = market.get('question') or market.get('title') or market.get('name', 'N/A')
+                        print(f"  Result {i}: {title[:100]}")
+                    
+                    # If results seem irrelevant, try filtering by checking if query terms appear
+                    # But first, let's see if the API is actually using the q parameter
+                    # If all results are unrelated, the q parameter might not be working
                     return markets
             except Exception as e:
                 print(f"API search with 'q' parameter failed: {e}")
+                import traceback
+                traceback.print_exc()
             
             # Fallback: Try without date filter (some markets might not have end dates)
             params = {
@@ -175,8 +187,7 @@ class PolymarketClient:
                 "q": query,
                 "active": "true",
                 "closed": "false",
-                "order": "volumeNum",
-                "ascending": "false"
+                # Don't use "order": "volumeNum" when searching - it overrides search relevance!
             }
             
             try:
