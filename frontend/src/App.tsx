@@ -6,8 +6,14 @@ import axios from 'axios'
 import type { Message, ChatResponse, Market } from './types'
 
 // Use environment variable for production, or relative URL for development
-// In production, set VITE_API_BASE_URL in Vercel environment variables
+// In production, set VITE_API_BASE_URL in Railway environment variables
+// NOTE: Vite env vars are baked at build time - rebuild frontend after setting this!
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || ''
+
+// Log API URL for debugging (will show in browser console)
+if (import.meta.env.DEV) {
+  console.log('API_BASE_URL:', API_BASE_URL || '(empty - using relative URLs)')
+}
 
 function App() {
   const getInitialMessage = (lang: 'en' | 'zh'): string => {
