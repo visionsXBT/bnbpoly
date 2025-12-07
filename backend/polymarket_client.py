@@ -333,6 +333,33 @@ class PolymarketClient:
                 if term_lower in slug:
                     score += 25  # Slug matches are highly relevant
             
+            # Penalty for mismatched sports/events (e.g., NBA query but Super Bowl market)
+            # Check if query mentions specific sports/events and market mentions different ones
+            sports_keywords = {
+                'nba': ['nba', 'basketball', 'basket'],
+                'nfl': ['nfl', 'football', 'super bowl', 'superbowl'],
+                'mlb': ['mlb', 'baseball'],
+                'nhl': ['nhl', 'hockey', 'stanley cup'],
+                'soccer': ['soccer', 'football', 'premier league', 'champions league', 'world cup'],
+                'election': ['election', 'president', 'mayor', 'senate', 'congress'],
+                'crypto': ['bitcoin', 'btc', 'ethereum', 'eth', 'crypto', 'cryptocurrency']
+            }
+            
+            query_lower_words = set(re.findall(r'\b\w+\b', query_lower))
+            market_text = f"{question} {title} {slug}".lower()
+            
+            # Check for sport/event mismatches
+            for sport, keywords in sports_keywords.items():
+                query_has_sport = any(kw in query_lower for kw in keywords)
+                market_has_sport = any(kw in market_text for kw in keywords)
+                
+                if query_has_sport and not market_has_sport:
+                    # Query mentions this sport but market doesn't - significant penalty
+                    score -= 50
+                elif not query_has_sport and market_has_sport:
+                    # Market mentions sport but query doesn't - smaller penalty
+                    score -= 20
+            
             # Bonus for volume (more popular markets are more likely to be what user wants)
             volume = float(market.get('volumeNum', 0) or market.get('volume', 0) or 0)
             if volume > 0:

@@ -139,8 +139,10 @@ class InsightGenerator:
 LANGUAGE REQUIREMENT: Respond in {response_language}. If the user writes in Chinese, respond in Chinese. If the user writes in English, respond in English. Always match the user's language preference.
 
 CRITICAL RULES - READ CAREFULLY:
-- **ALWAYS USE PROVIDED MARKET DATA**: If market data is provided in the "Market data context" section, you MUST analyze and use that data. NEVER say "I don't see a market" or "I can't find the market" when market data is provided. The market data has been searched and found for you - use it!
-- **If market data is provided, it IS the relevant market** - analyze it directly, don't claim it doesn't exist or isn't available.
+- **ONLY USE PROVIDED MARKET DATA**: You MUST ONLY analyze and provide insights based on the market data provided in the "Market data context" section. Do NOT make up predictions or probabilities based on general knowledge when market data is provided.
+- **If the wrong markets are found** (e.g., user asks about NBA but Super Bowl markets are provided), you MUST acknowledge this mismatch and state that the specific market requested was not found. Do NOT provide predictions based on general knowledge in this case.
+- **If market data is provided, it IS the relevant market** - analyze it directly using ONLY the data provided. Do not supplement with general knowledge predictions unless NO market data is provided at all.
+- **When market data is provided, base ALL metrics, probabilities, and recommendations on that actual data** - not on general knowledge or external information.
 - Always use the current date and time provided in the user message to calculate accurate time differences. Do not estimate or guess the current date.
 - Pay close attention to conversation history. If the user asks a follow-up question (e.g., "who do you think will win?", "based on the candidates"), they are likely referring to a market discussed in the previous conversation. Use the conversation context to understand what market or event they're asking about.
 - If a market was discussed previously, maintain that context even if the user doesn't explicitly mention it again.
