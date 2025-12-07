@@ -141,7 +141,7 @@ class PolymarketClient:
             # Strategy 1: Use full query with Polymarket API search parameter
             # Trust Polymarket's search algorithm - it should handle matching
             params = {
-                "limit": limit * 2,  # Fetch more to filter strictly
+                "limit": limit * 3,  # Fetch more to filter strictly
                 "q": query,  # Use full query exactly as provided
                 "active": "true",
                 "closed": "false",
@@ -156,8 +156,10 @@ class PolymarketClient:
                 markets = response.json()
                 
                 if markets and len(markets) > 0:
+                    print(f"API search returned {len(markets)} markets for query: {query}")
                     # Strict filtering - only return markets that actually match the query
                     filtered = self._filter_markets_by_relevance(markets, query, strict=True)
+                    print(f"After strict filtering: {len(filtered)} markets match")
                     if filtered:
                         return filtered[:limit]
             except Exception as e:
@@ -187,8 +189,10 @@ class PolymarketClient:
             
             # Strategy 3: If API search returns nothing, try fetching and filtering
             # But only if we have a reasonable match threshold
+            # NOTE: This fallback should rarely be needed if API search works
+            print("API search returned no results, trying fallback strategy...")
             params = {
-                "limit": limit * 10,
+                "limit": limit * 20,  # Fetch more markets
                 "active": "true",
                 "closed": "false",
                 "order": "volumeNum",
@@ -201,8 +205,10 @@ class PolymarketClient:
                 all_markets = response.json()
                 
                 if all_markets:
+                    print(f"Fallback: fetched {len(all_markets)} markets, filtering for query: {query}")
                     # Very strict filtering - only return if there's a strong match
                     filtered = self._filter_markets_by_relevance(all_markets, query, strict=True)
+                    print(f"Fallback: after filtering, {len(filtered)} markets match")
                     if filtered:
                         return filtered[:limit]
             except Exception as e:
@@ -335,12 +341,16 @@ class PolymarketClient:
                     score += slug_count * (base_weight * 1.2 * term_weight)  # Slug matches are very relevant
             
             # In strict mode, require subject terms to match (not just dates)
+            # This is CRITICAL - prevents NFL markets from appearing for non-sports queries
             if strict and len(subject_terms) > 0:
                 if matched_subject_terms < min_subject_terms_to_match:
+                    # Debug: log why market was skipped
+                    print(f"Skipping market '{question[:50]}...' - matched {matched_subject_terms} subject terms, need {min_subject_terms_to_match}")
                     continue  # Skip this market - doesn't match subject terms
             
             # Also require minimum overall terms to match
             if strict and matched_terms < min_terms_to_match:
+                print(f"Skipping market '{question[:50]}...' - matched {matched_terms} terms, need {min_terms_to_match}")
                 continue  # Skip this market - doesn't match enough terms
             
             # Heavy penalty if NO terms match at all
