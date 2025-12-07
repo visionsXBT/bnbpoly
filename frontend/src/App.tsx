@@ -317,6 +317,7 @@ function App() {
       <LandingPage 
         onEnter={handleEnterLanding} 
         language={language}
+        onLanguageChange={setLanguage}
       />
     )
   }

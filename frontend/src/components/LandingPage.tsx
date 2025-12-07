@@ -3,9 +3,10 @@ import './LandingPage.css'
 interface LandingPageProps {
   onEnter: () => void
   language: 'en' | 'zh'
+  onLanguageChange: (lang: 'en' | 'zh') => void
 }
 
-function LandingPage({ onEnter, language }: LandingPageProps) {
+function LandingPage({ onEnter, language, onLanguageChange }: LandingPageProps) {
   const title = language === 'zh' ? 'BNBPOLY' : 'BNBPOLY'
   const subtitle = language === 'zh' 
     ? 'Polymarket 洞察助手' 
@@ -17,6 +18,20 @@ function LandingPage({ onEnter, language }: LandingPageProps) {
 
   return (
     <div className="landing-page">
+      <div className="landing-language-selector">
+        <button 
+          className={`landing-lang-btn ${language === 'en' ? 'active' : ''}`}
+          onClick={() => onLanguageChange('en')}
+        >
+          EN
+        </button>
+        <button 
+          className={`landing-lang-btn ${language === 'zh' ? 'active' : ''}`}
+          onClick={() => onLanguageChange('zh')}
+        >
+          中文
+        </button>
+      </div>
       <div className="landing-content">
         <div className="landing-logo-container">
           <img src="/bnbpoly.png" alt="BNBPOLY Logo" className="landing-logo" />
