@@ -274,7 +274,9 @@ class PolymarketClient:
             elif word[0].isupper() if word else False:
                 important_terms.append(word.lower())
             # Keep common important terms
-            elif word in ['bitcoin', 'btc', 'ethereum', 'eth', 'price', 'hit', 'reach', 'election', 'win', 'trump', 'biden']:
+            elif word in ['bitcoin', 'btc', 'ethereum', 'eth', 'price', 'hit', 'reach', 'election', 'win', 'trump', 'biden',
+                         'uefa', 'champions', 'league', 'premier', 'nba', 'nfl', 'super', 'bowl', 'nhl', 'mlb',
+                         'arsenal', 'madrid', 'barcelona', 'bayern', 'munich', 'psg', 'liverpool', 'chelsea', 'city']:
                 important_terms.append(word)
         
         scored_markets = []
@@ -336,29 +338,66 @@ class PolymarketClient:
             # Penalty for mismatched sports/events (e.g., NBA query but Super Bowl market)
             # Check if query mentions specific sports/events and market mentions different ones
             sports_keywords = {
-                'nba': ['nba', 'basketball', 'basket'],
-                'nfl': ['nfl', 'football', 'super bowl', 'superbowl'],
-                'mlb': ['mlb', 'baseball'],
-                'nhl': ['nhl', 'hockey', 'stanley cup'],
-                'soccer': ['soccer', 'football', 'premier league', 'champions league', 'world cup'],
-                'election': ['election', 'president', 'mayor', 'senate', 'congress'],
-                'crypto': ['bitcoin', 'btc', 'ethereum', 'eth', 'crypto', 'cryptocurrency']
+                'nba': ['nba', 'basketball', 'basket', 'nba championship', 'nba finals'],
+                'nfl': ['nfl', 'american football', 'super bowl', 'superbowl', 'nfl championship'],
+                'mlb': ['mlb', 'baseball', 'world series', 'mlb championship'],
+                'nhl': ['nhl', 'hockey', 'stanley cup', 'nhl championship'],
+                'soccer': ['soccer', 'football', 'uefa', 'champions league', 'premier league', 'world cup', 
+                          'bundesliga', 'la liga', 'serie a', 'arsenal', 'manchester', 'real madrid', 
+                          'barcelona', 'bayern', 'psg', 'liverpool', 'chelsea', 'inter', 'juventus'],
+                'election': ['election', 'president', 'mayor', 'senate', 'congress', 'vote', 'candidate'],
+                'crypto': ['bitcoin', 'btc', 'ethereum', 'eth', 'crypto', 'cryptocurrency', 'price']
             }
             
             query_lower_words = set(re.findall(r'\b\w+\b', query_lower))
             market_text = f"{question} {title} {slug}".lower()
             
             # Check for sport/event mismatches
+            query_sports = set()
+            market_sports = set()
+            
             for sport, keywords in sports_keywords.items():
-                query_has_sport = any(kw in query_lower for kw in keywords)
-                market_has_sport = any(kw in market_text for kw in keywords)
+                if any(kw in query_lower for kw in keywords):
+                    query_sports.add(sport)
+                if any(kw in market_text for kw in keywords):
+                    market_sports.add(sport)
+            
+            # If query mentions a specific sport but market is about a different sport, heavy penalty
+            if query_sports and market_sports:
+                if not query_sports.intersection(market_sports):
+                    # Completely different sports - heavy penalty
+                    score -= 100
+            elif query_sports and not market_sports:
+                # Query mentions sport but market doesn't - significant penalty
+                score -= 50
+            elif not query_sports and market_sports:
+                # Market mentions sport but query doesn't - smaller penalty (might be relevant)
+                score -= 10
+            
+            # Special handling for soccer - many variations
+            if 'soccer' in query_sports or 'soccer' in market_sports:
+                # Check for specific soccer competitions
+                soccer_competitions = {
+                    'champions league': ['champions league', 'uefa champions', 'ucl'],
+                    'premier league': ['premier league', 'epl', 'english premier'],
+                    'world cup': ['world cup', 'fifa world cup'],
+                    'bundesliga': ['bundesliga'],
+                    'la liga': ['la liga', 'spanish league'],
+                    'serie a': ['serie a', 'italian league']
+                }
                 
-                if query_has_sport and not market_has_sport:
-                    # Query mentions this sport but market doesn't - significant penalty
-                    score -= 50
-                elif not query_has_sport and market_has_sport:
-                    # Market mentions sport but query doesn't - smaller penalty
-                    score -= 20
+                query_competition = None
+                market_competition = None
+                
+                for comp, keywords in soccer_competitions.items():
+                    if any(kw in query_lower for kw in keywords):
+                        query_competition = comp
+                    if any(kw in market_text for kw in keywords):
+                        market_competition = comp
+                
+                # If query asks about specific competition but market is different competition
+                if query_competition and market_competition and query_competition != market_competition:
+                    score -= 75  # Different soccer competitions - significant penalty
             
             # Bonus for volume (more popular markets are more likely to be what user wants)
             volume = float(market.get('volumeNum', 0) or market.get('volume', 0) or 0)
