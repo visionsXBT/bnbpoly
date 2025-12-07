@@ -230,17 +230,24 @@ class PolymarketClient:
         query_words = {w for w in query_words if w not in stop_words and len(w) > 1}  # Keep 2+ char words
         
         # Extract all meaningful terms from query
-        important_terms = []
+        # Separate dates/years from subject terms
+        date_terms = []  # Years, dates - less important for matching
+        subject_terms = []  # Main subject terms - must match
+        
         for word in query_words:
-            # Keep numbers (years, prices, etc.)
+            # Keep numbers (years, prices, etc.) but treat them as less important
             if word.isdigit() or (word.replace('.', '').replace('-', '').isdigit()):
-                important_terms.append(word)
+                date_terms.append(word)
             # Keep all meaningful words (not filtered by hardcoded list)
             elif len(word) > 2:
-                important_terms.append(word.lower())
+                subject_terms.append(word.lower())
         
-        # Calculate minimum match threshold based on query length
-        # For strict mode, require at least 30% of important terms to match
+        # Combine all terms for scoring, but require subject terms to match
+        important_terms = subject_terms + date_terms
+        
+        # Calculate minimum match threshold
+        # For strict mode, require at least 1 subject term to match (not just dates)
+        min_subject_terms_to_match = 1 if strict and len(subject_terms) > 0 else 0
         min_terms_to_match = max(1, int(len(important_terms) * 0.3)) if strict else 1
         
         scored_markets = []
@@ -300,11 +307,18 @@ class PolymarketClient:
             
             # Score based on all query terms matching
             matched_terms = 0
+            matched_subject_terms = 0  # Track subject term matches separately
+            
             for term in important_terms:
                 term_lower = term.lower()
+                is_subject_term = term_lower in subject_terms
+                
                 # Check if term appears in market text
                 if term_lower in question or term_lower in title or term_lower in slug:
                     matched_terms += 1
+                    if is_subject_term:
+                        matched_subject_terms += 1
+                    
                     # Count occurrences (some terms might appear multiple times)
                     question_count = question.count(term_lower)
                     title_count = title.count(term_lower)
@@ -313,11 +327,19 @@ class PolymarketClient:
                     # Weight by term length (longer terms are more specific and important)
                     term_weight = min(len(term), 5)  # Cap at 5x weight for very long terms
                     
-                    score += question_count * (20 * term_weight)
-                    score += title_count * (15 * term_weight)
-                    score += slug_count * (25 * term_weight)  # Slug matches are very relevant
+                    # Subject terms get higher weight than date terms
+                    base_weight = 30 if is_subject_term else 10
+                    
+                    score += question_count * (base_weight * term_weight)
+                    score += title_count * (base_weight * 0.8 * term_weight)
+                    score += slug_count * (base_weight * 1.2 * term_weight)  # Slug matches are very relevant
             
-            # In strict mode, require minimum number of terms to match
+            # In strict mode, require subject terms to match (not just dates)
+            if strict and len(subject_terms) > 0:
+                if matched_subject_terms < min_subject_terms_to_match:
+                    continue  # Skip this market - doesn't match subject terms
+            
+            # Also require minimum overall terms to match
             if strict and matched_terms < min_terms_to_match:
                 continue  # Skip this market - doesn't match enough terms
             
