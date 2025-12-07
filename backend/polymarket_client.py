@@ -130,7 +130,7 @@ class PolymarketClient:
             return []
     
     async def search_markets(self, query: str, limit: int = 20) -> List[Dict]:
-        """Search for markets by query string. Uses full query for general-purpose search."""
+        """Search for markets by query string. Uses full query and trusts Polymarket API search."""
         try:
             from datetime import datetime, timedelta
             
@@ -139,10 +139,10 @@ class PolymarketClient:
             min_end_date = (current_date + timedelta(days=1)).isoformat() + 'Z'
             
             # Strategy 1: Use full query with Polymarket API search parameter
-            # This lets Polymarket's search algorithm handle the matching
+            # Trust Polymarket's search algorithm - it should handle matching
             params = {
-                "limit": limit * 3,  # Fetch more to filter
-                "q": query,  # Use full query - let API handle it
+                "limit": limit * 2,  # Fetch more to filter strictly
+                "q": query,  # Use full query exactly as provided
                 "active": "true",
                 "closed": "false",
                 "end_date_min": min_end_date,
@@ -156,8 +156,8 @@ class PolymarketClient:
                 markets = response.json()
                 
                 if markets and len(markets) > 0:
-                    # Light filtering by relevance (less strict)
-                    filtered = self._filter_markets_by_relevance(markets, query, strict=False)
+                    # Strict filtering - only return markets that actually match the query
+                    filtered = self._filter_markets_by_relevance(markets, query, strict=True)
                     if filtered:
                         return filtered[:limit]
             except Exception as e:
@@ -165,7 +165,7 @@ class PolymarketClient:
             
             # Strategy 2: Try without date filter (some markets might not have end dates)
             params = {
-                "limit": limit * 3,
+                "limit": limit * 2,
                 "q": query,
                 "active": "true",
                 "closed": "false",
@@ -179,16 +179,16 @@ class PolymarketClient:
                 markets = response.json()
                 
                 if markets and len(markets) > 0:
-                    filtered = self._filter_markets_by_relevance(markets, query, strict=False)
+                    filtered = self._filter_markets_by_relevance(markets, query, strict=True)
                     if filtered:
                         return filtered[:limit]
             except Exception as e:
                 print(f"API search without date filter failed: {e}")
             
-            # Strategy 3: Fetch many active markets and filter by full query text matching
-            # This is a fallback if API search doesn't work
+            # Strategy 3: If API search returns nothing, try fetching and filtering
+            # But only if we have a reasonable match threshold
             params = {
-                "limit": limit * 30,  # Fetch many markets
+                "limit": limit * 10,
                 "active": "true",
                 "closed": "false",
                 "order": "volumeNum",
@@ -201,8 +201,8 @@ class PolymarketClient:
                 all_markets = response.json()
                 
                 if all_markets:
-                    # Filter by relevance to full query
-                    filtered = self._filter_markets_by_relevance(all_markets, query, strict=False)
+                    # Very strict filtering - only return if there's a strong match
+                    filtered = self._filter_markets_by_relevance(all_markets, query, strict=True)
                     if filtered:
                         return filtered[:limit]
             except Exception as e:
@@ -216,7 +216,7 @@ class PolymarketClient:
             return []
     
     def _filter_markets_by_relevance(self, markets: List[Dict], query: str, strict: bool = True) -> List[Dict]:
-        """Filter and score markets by relevance to query. Uses full query text matching."""
+        """Filter and score markets by relevance to query. Strict mode only returns strong matches."""
         import re
         
         # Normalize query
@@ -226,19 +226,22 @@ class PolymarketClient:
         # Remove only very common stop words (keep more words for better matching)
         stop_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 
                      'will', 'be', 'is', 'are', 'was', 'were', 'have', 'has', 'had', 'do', 'does', 'did', 
-                     'can', 'could', 'should', 'would', 'may', 'might', 'must'}
+                     'can', 'could', 'should', 'would', 'may', 'might', 'must', 'what', 'when', 'where', 'who', 'why', 'how'}
         query_words = {w for w in query_words if w not in stop_words and len(w) > 1}  # Keep 2+ char words
         
-        # Extract all meaningful terms from query (not just hardcoded keywords)
+        # Extract all meaningful terms from query
         important_terms = []
         for word in query_words:
             # Keep numbers (years, prices, etc.)
             if word.isdigit() or (word.replace('.', '').replace('-', '').isdigit()):
                 important_terms.append(word)
-            # Keep all words that are likely meaningful (proper nouns, technical terms, etc.)
-            # Don't filter by hardcoded list - use all query words
-            elif len(word) > 2:  # Keep words longer than 2 chars
+            # Keep all meaningful words (not filtered by hardcoded list)
+            elif len(word) > 2:
                 important_terms.append(word.lower())
+        
+        # Calculate minimum match threshold based on query length
+        # For strict mode, require at least 30% of important terms to match
+        min_terms_to_match = max(1, int(len(important_terms) * 0.3)) if strict else 1
         
         scored_markets = []
         
@@ -295,94 +298,43 @@ class PolymarketClient:
             matches = query_words.intersection(slug_words)
             score += len(matches) * 12  # Slug matches are very relevant
             
-            # Score based on all query terms (not just hardcoded keywords)
-            # This makes it work for any query, not just predefined terms
+            # Score based on all query terms matching
+            matched_terms = 0
             for term in important_terms:
                 term_lower = term.lower()
-                # Count occurrences (some terms might appear multiple times)
-                question_count = question.count(term_lower)
-                title_count = title.count(term_lower)
-                slug_count = slug.count(term_lower)
-                
-                # Weight by term length (longer terms are more specific and important)
-                term_weight = min(len(term), 5)  # Cap at 5x weight for very long terms
-                
-                score += question_count * (15 * term_weight)
-                score += title_count * (12 * term_weight)
-                score += slug_count * (18 * term_weight)  # Slug matches are very relevant
+                # Check if term appears in market text
+                if term_lower in question or term_lower in title or term_lower in slug:
+                    matched_terms += 1
+                    # Count occurrences (some terms might appear multiple times)
+                    question_count = question.count(term_lower)
+                    title_count = title.count(term_lower)
+                    slug_count = slug.count(term_lower)
+                    
+                    # Weight by term length (longer terms are more specific and important)
+                    term_weight = min(len(term), 5)  # Cap at 5x weight for very long terms
+                    
+                    score += question_count * (20 * term_weight)
+                    score += title_count * (15 * term_weight)
+                    score += slug_count * (25 * term_weight)  # Slug matches are very relevant
             
-            # Penalty for mismatched sports/events (e.g., NBA query but Super Bowl market)
-            # Check if query mentions specific sports/events and market mentions different ones
-            sports_keywords = {
-                'nba': ['nba', 'basketball', 'basket', 'nba championship', 'nba finals'],
-                'nfl': ['nfl', 'american football', 'super bowl', 'superbowl', 'nfl championship'],
-                'mlb': ['mlb', 'baseball', 'world series', 'mlb championship'],
-                'nhl': ['nhl', 'hockey', 'stanley cup', 'nhl championship'],
-                'soccer': ['soccer', 'football', 'uefa', 'champions league', 'premier league', 'world cup', 
-                          'bundesliga', 'la liga', 'serie a', 'arsenal', 'manchester', 'real madrid', 
-                          'barcelona', 'bayern', 'psg', 'liverpool', 'chelsea', 'inter', 'juventus'],
-                'election': ['election', 'president', 'mayor', 'senate', 'congress', 'vote', 'candidate'],
-                'crypto': ['bitcoin', 'btc', 'ethereum', 'eth', 'crypto', 'cryptocurrency', 'price']
-            }
+            # In strict mode, require minimum number of terms to match
+            if strict and matched_terms < min_terms_to_match:
+                continue  # Skip this market - doesn't match enough terms
             
-            query_lower_words = set(re.findall(r'\b\w+\b', query_lower))
-            market_text = f"{question} {title} {slug}".lower()
-            
-            # Check for sport/event mismatches
-            query_sports = set()
-            market_sports = set()
-            
-            for sport, keywords in sports_keywords.items():
-                if any(kw in query_lower for kw in keywords):
-                    query_sports.add(sport)
-                if any(kw in market_text for kw in keywords):
-                    market_sports.add(sport)
-            
-            # If query mentions a specific sport but market is about a different sport, heavy penalty
-            if query_sports and market_sports:
-                if not query_sports.intersection(market_sports):
-                    # Completely different sports - heavy penalty
-                    score -= 100
-            elif query_sports and not market_sports:
-                # Query mentions sport but market doesn't - significant penalty
-                score -= 50
-            elif not query_sports and market_sports:
-                # Market mentions sport but query doesn't - smaller penalty (might be relevant)
-                score -= 10
-            
-            # Special handling for soccer - many variations
-            if 'soccer' in query_sports or 'soccer' in market_sports:
-                # Check for specific soccer competitions
-                soccer_competitions = {
-                    'champions league': ['champions league', 'uefa champions', 'ucl'],
-                    'premier league': ['premier league', 'epl', 'english premier'],
-                    'world cup': ['world cup', 'fifa world cup'],
-                    'bundesliga': ['bundesliga'],
-                    'la liga': ['la liga', 'spanish league'],
-                    'serie a': ['serie a', 'italian league']
-                }
-                
-                query_competition = None
-                market_competition = None
-                
-                for comp, keywords in soccer_competitions.items():
-                    if any(kw in query_lower for kw in keywords):
-                        query_competition = comp
-                    if any(kw in market_text for kw in keywords):
-                        market_competition = comp
-                
-                # If query asks about specific competition but market is different competition
-                if query_competition and market_competition and query_competition != market_competition:
-                    score -= 75  # Different soccer competitions - significant penalty
+            # Heavy penalty if NO terms match at all
+            if matched_terms == 0:
+                continue  # Skip markets with zero matches
             
             # Bonus for volume (more popular markets are more likely to be what user wants)
             volume = float(market.get('volumeNum', 0) or market.get('volume', 0) or 0)
             if volume > 0:
                 # Higher volume = more relevant, but cap it
-                score += min(volume / 500000, 10)  # Cap at 10 points, scales with volume
+                score += min(volume / 1000000, 5)  # Cap at 5 points, scales with volume
             
+            # Only include markets with positive score
             if score > 0:
                 market['_relevance_score'] = score
+                market['_matched_terms'] = matched_terms
                 scored_markets.append(market)
         
         # Sort by relevance score (descending)
