@@ -11,8 +11,8 @@ function LandingPage({ onEnter, language }: LandingPageProps) {
     ? 'Polymarket 洞察助手' 
     : 'Polymarket Insights Assistant'
   const description = language === 'zh'
-    ? 'AI 驱动的预测市场分析和投注洞察'
-    : 'AI-powered prediction market analysis and betting insights'
+    ? 'AI 驱动的预测市场分析和投注洞察。获取实时数据、专家分析和可操作的见解，做出明智决策。'
+    : 'AI-powered prediction market analysis and betting insights. Get real-time data, expert analysis, and actionable insights to make informed decisions.'
   const enterButton = language === 'zh' ? '开始使用' : 'Get Started'
 
   return (

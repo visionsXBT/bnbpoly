@@ -130,19 +130,124 @@ class PolymarketClient:
             return []
     
     async def search_markets(self, query: str, limit: int = 20) -> List[Dict]:
-        """Search for markets by query string."""
+        """Search for markets by query string. Tries multiple search strategies."""
         try:
+            from datetime import datetime, timedelta
+            
             url = f"{self.api_url}/markets"
+            current_date = datetime.now()
+            min_end_date = (current_date + timedelta(days=1)).isoformat() + 'Z'
+            
+            # Strategy 1: Try API search parameter
             params = {
-                "limit": limit,
-                "q": query
+                "limit": limit * 3,  # Fetch more to filter
+                "q": query,
+                "active": "true",
+                "closed": "false",
+                "end_date_min": min_end_date,
+                "order": "volumeNum",
+                "ascending": "false"
             }
+            
+            try:
+                response = await self.client.get(url, params=params)
+                response.raise_for_status()
+                markets = response.json()
+                
+                if markets and len(markets) > 0:
+                    # Filter and sort by relevance
+                    filtered = self._filter_markets_by_relevance(markets, query)
+                    return filtered[:limit]
+            except Exception as e:
+                print(f"API search with 'q' parameter failed: {e}")
+            
+            # Strategy 2: Fetch all active markets and filter by keywords
+            params = {
+                "limit": limit * 10,  # Fetch many markets
+                "active": "true",
+                "closed": "false",
+                "end_date_min": min_end_date,
+                "order": "volumeNum",
+                "ascending": "false"
+            }
+            
             response = await self.client.get(url, params=params)
             response.raise_for_status()
-            return response.json()
+            all_markets = response.json()
+            
+            if all_markets:
+                # Filter by relevance to query
+                filtered = self._filter_markets_by_relevance(all_markets, query)
+                return filtered[:limit]
+            
+            return []
         except Exception as e:
             print(f"Error searching markets: {e}")
+            import traceback
+            traceback.print_exc()
             return []
+    
+    def _filter_markets_by_relevance(self, markets: List[Dict], query: str) -> List[Dict]:
+        """Filter and score markets by relevance to query."""
+        import re
+        
+        # Normalize query - extract key terms
+        query_lower = query.lower()
+        query_words = set(re.findall(r'\b\w+\b', query_lower))
+        # Remove common stop words
+        stop_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'will', 'be', 'is', 'are', 'was', 'were', 'have', 'has', 'had', 'do', 'does', 'did', 'can', 'could', 'should', 'would', 'may', 'might', 'must'}
+        query_words = {w for w in query_words if w not in stop_words and len(w) > 2}
+        
+        scored_markets = []
+        
+        for market in markets:
+            if market.get('closed', False):
+                continue
+            
+            score = 0
+            question = str(market.get('question', '') or '').lower()
+            title = str(market.get('title', '') or market.get('name', '') or '').lower()
+            description = str(market.get('description', '') or '').lower()
+            
+            # Check for exact phrase matches (highest score)
+            if query_lower in question or query_lower in title:
+                score += 100
+            
+            # Check for individual word matches
+            question_words = set(re.findall(r'\b\w+\b', question))
+            title_words = set(re.findall(r'\b\w+\b', title))
+            
+            # Count matching words
+            matches = query_words.intersection(question_words)
+            score += len(matches) * 10
+            
+            matches = query_words.intersection(title_words)
+            score += len(matches) * 8
+            
+            # Bonus for proper nouns (capitalized words) matching
+            query_proper = [w for w in query_words if w[0].isupper() or any(c.isupper() for c in w)]
+            if query_proper:
+                for word in query_proper:
+                    if word in question or word in title:
+                        score += 15
+            
+            # Bonus for volume (more popular markets are more likely to be what user wants)
+            volume = float(market.get('volumeNum', 0) or market.get('volume', 0) or 0)
+            if volume > 0:
+                score += min(volume / 1000000, 5)  # Cap at 5 points
+            
+            if score > 0:
+                market['_relevance_score'] = score
+                scored_markets.append(market)
+        
+        # Sort by relevance score (descending)
+        scored_markets.sort(key=lambda x: x.get('_relevance_score', 0), reverse=True)
+        
+        # Remove the temporary score field
+        for market in scored_markets:
+            market.pop('_relevance_score', None)
+        
+        return scored_markets
     
     async def get_event_by_slug(self, event_slug: str) -> Optional[Dict]:
         """Fetch event data by event slug from Polymarket URL."""

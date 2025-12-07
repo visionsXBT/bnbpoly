@@ -142,11 +142,32 @@ async def chat(message: ChatMessage):
             if market_details:
                 trades = await polymarket_client.get_market_trades(message.market_id)
         elif message.search_query:
-            # Search for markets
+            # Search for markets using explicit search query
             market_data = await polymarket_client.search_markets(message.search_query)
+            # If we found a single highly relevant market, treat it as market_details
+            if market_data and len(market_data) == 1:
+                market_details = market_data[0]
+                if market_details.get('id'):
+                    trades = await polymarket_client.get_market_trades(market_details['id'])
         else:
-            # Get general market data
-            market_data = await polymarket_client.get_markets(limit=10)
+            # No URL provided - try to search for markets based on user's query
+            # Extract keywords from the message to search
+            search_results = await polymarket_client.search_markets(message.message, limit=5)
+            if search_results and len(search_results) > 0:
+                # If we found a single highly relevant market, use it as market_details
+                if len(search_results) == 1:
+                    market_details = search_results[0]
+                    if market_details.get('id'):
+                        trades = await polymarket_client.get_market_trades(market_details['id'])
+                else:
+                    # Multiple results - use as market_data
+                    market_data = search_results
+                    # Get trades for the most relevant market
+                    if search_results[0].get('id'):
+                        trades = await polymarket_client.get_market_trades(search_results[0]['id'])
+            else:
+                # Fallback: Get general market data if search found nothing
+                market_data = await polymarket_client.get_markets(limit=10)
         
         # Convert conversation history to dict format if provided
         conv_history = None
