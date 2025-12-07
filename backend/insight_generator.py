@@ -70,7 +70,8 @@ class InsightGenerator:
         
         if market_details:
             formatted_details = {}
-            context_parts.append(f"\nDetailed market information:")
+            context_parts.append(f"\n=== PRIMARY MARKET DATA (USE THIS DATA) ===")
+            context_parts.append("This is the specific market that matches the user's query. You MUST analyze this market and provide insights based on this data.")
             
             # Extract key information
             question = market_details.get('question') or market_details.get('title') or market_details.get('name')
