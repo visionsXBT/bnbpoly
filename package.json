@@ -1,0 +1,15 @@
+{
+  "name": "polymarket-insights-chatbot",
+  "version": "1.0.0",
+  "description": "Polymarket Insights Chatbot - Full Stack Application",
+  "scripts": {
+    "build:frontend": "cd frontend && npm install && npm run build",
+    "build:backend": "cd backend && pip install -r requirements.txt",
+    "start:backend": "cd backend && uvicorn main:app --host 0.0.0.0 --port $PORT",
+    "start:frontend": "cd frontend && npm run preview"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}
+
