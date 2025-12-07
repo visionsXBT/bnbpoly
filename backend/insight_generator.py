@@ -33,11 +33,21 @@ class InsightGenerator:
         context_parts = []
         
         if market_data:
-            context_parts.append(f"Available markets ({len(market_data)}):")
-            for market in market_data[:10]:  # Limit to first 10 for context
-                market_info = f"- {market.get('question', market.get('title', market.get('name', 'N/A')))}"
+            context_parts.append(f"RELEVANT MARKETS FOUND ({len(market_data)}):")
+            context_parts.append("IMPORTANT: These markets have been searched and found based on the user's query. You MUST analyze these markets and provide insights based on this data.")
+            for i, market in enumerate(market_data[:10], 1):  # Limit to first 10 for context
+                market_info = f"\nMarket {i}: {market.get('question', market.get('title', market.get('name', 'N/A')))}"
                 if market.get('id'):
                     market_info += f" (ID: {market.get('id')})"
+                
+                # Add volume and liquidity if available
+                volume = market.get('volumeNum') or market.get('volume')
+                liquidity = market.get('liquidityNum') or market.get('liquidity')
+                if volume:
+                    market_info += f" | Volume: ${float(volume):,.0f}" if isinstance(volume, (int, float)) else f" | Volume: {volume}"
+                if liquidity:
+                    market_info += f" | Liquidity: ${float(liquidity):,.0f}" if isinstance(liquidity, (int, float)) else f" | Liquidity: {liquidity}"
+                
                 context_parts.append(market_info)
                 
                 # Extract outcomes/choices from market if available
@@ -127,17 +137,20 @@ class InsightGenerator:
 
 LANGUAGE REQUIREMENT: Respond in {response_language}. If the user writes in Chinese, respond in Chinese. If the user writes in English, respond in English. Always match the user's language preference.
 
-IMPORTANT: 
+CRITICAL RULES - READ CAREFULLY:
+- **ALWAYS USE PROVIDED MARKET DATA**: If market data is provided in the "Market data context" section, you MUST analyze and use that data. NEVER say "I don't see a market" or "I can't find the market" when market data is provided. The market data has been searched and found for you - use it!
+- **If market data is provided, it IS the relevant market** - analyze it directly, don't claim it doesn't exist or isn't available.
 - Always use the current date and time provided in the user message to calculate accurate time differences. Do not estimate or guess the current date.
 - Pay close attention to conversation history. If the user asks a follow-up question (e.g., "who do you think will win?", "based on the candidates"), they are likely referring to a market discussed in the previous conversation. Use the conversation context to understand what market or event they're asking about.
 - If a market was discussed previously, maintain that context even if the user doesn't explicitly mention it again.
 - MAKE INTELLIGENT PREDICTIONS: When asked "who do you think will win?" or similar questions, you MUST provide specific predictions based on:
+  * The market data provided (if available)
   * Current events, news, and trends relevant to the market
   * Historical patterns and precedents
   * Market data available (volume, liquidity, timing)
   * General knowledge about likely candidates/outcomes
   * Analysis of what makes sense given the context
-- Do NOT simply say "I can't see the probabilities" or "wait for more data". Instead, use your knowledge to make educated predictions.
+- Do NOT simply say "I can't see the probabilities" or "wait for more data" when market data is provided. Instead, use the provided data and your knowledge to make educated predictions.
 - Be specific: Name actual candidates, outcomes, or scenarios you think are likely.
 - Explain your reasoning based on current events, trends, and market dynamics.
 
