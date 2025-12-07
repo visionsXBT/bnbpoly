@@ -197,7 +197,8 @@ class InsightGenerator:
             for trade in trades[:10]:  # Limit to first 10
                 context_parts.append(json.dumps(trade, indent=2))
         
-        context = "\n".join(context_parts) if context_parts else "No specific market data provided."
+        # If no market data provided, don't mention it - just provide intelligent analysis
+        context = "\n".join(context_parts) if context_parts else ""
         
         # Determine response language based on user query and language preference
         is_chinese_query = language == 'zh' or any('\u4e00' <= char <= '\u9fff' for char in user_query)
@@ -208,11 +209,10 @@ class InsightGenerator:
 LANGUAGE REQUIREMENT: Respond in {response_language}. If the user writes in Chinese, respond in Chinese. If the user writes in English, respond in English. Always match the user's language preference.
 
 CRITICAL RULES - READ CAREFULLY:
-- **ONLY USE PROVIDED MARKET DATA**: You MUST ONLY analyze and provide insights based on the market data provided in the "Market data context" section. The markets provided were found by searching Polymarket using the user's query - they ARE relevant.
-- **NEVER claim markets are "wrong" or "mismatched"**: If market data is provided, it was found by searching for the user's query. Analyze the provided markets directly. Do NOT say "these markets don't match" or "wrong markets found".
-- **If market data is provided, it IS the relevant market** - analyze it directly using ONLY the data provided. The search algorithm found these markets for a reason - trust the data.
-- **When market data is provided, base ALL metrics, probabilities, and recommendations on that actual data** - not on general knowledge or external information.
-- **If NO market data is provided** (context says "No specific market data provided"), THEN you can say no markets were found. But if markets ARE provided, analyze them.
+- **USE PROVIDED MARKET DATA WHEN AVAILABLE**: If market data is provided in the "Market data context" section, analyze it and base your insights on that actual data. The markets provided were found by searching Polymarket using the user's query.
+- **NEVER mention that markets weren't found or that search failed**: Even if no market data is provided, do NOT say "no markets found" or "search didn't return results". Just provide intelligent analysis based on general knowledge.
+- **If market data is provided, analyze it directly** - use the actual data for metrics, probabilities, and recommendations.
+- **If NO market data is provided, provide intelligent predictions anyway**: Use your knowledge of current events, trends, historical patterns, and general market dynamics to provide thoughtful analysis. Don't mention the absence of market data - just provide the best analysis you can.
 - Always use the current date and time provided in the user message to calculate accurate time differences. Do not estimate or guess the current date.
 - Pay close attention to conversation history. If the user asks a follow-up question (e.g., "who do you think will win?", "based on the candidates"), they are likely referring to a market discussed in the previous conversation. Use the conversation context to understand what market or event they're asking about.
 - If a market was discussed previously, maintain that context even if the user doesn't explicitly mention it again.
@@ -273,7 +273,9 @@ Formatting Rules:
         # Get current date and time
         current_datetime = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
-        user_message = f"""Current date and time: {current_datetime}
+        # Build user message - only include market data context if it exists
+        if context:
+            user_message = f"""Current date and time: {current_datetime}
 
 {conversation_context}
 
@@ -283,13 +285,22 @@ Market data context:
 {context}
 
 Please provide insights based on the above information."""
+        else:
+            # No market data - provide intelligent analysis without mentioning it
+            user_message = f"""Current date and time: {current_datetime}
+
+{conversation_context}
+
+User query: {user_query}
+
+Please provide intelligent analysis and predictions based on current events, trends, historical patterns, and market dynamics. Use your knowledge to make educated predictions."""
         
         try:
             message = await asyncio.to_thread(
                 self.client.messages.create,
-                model="claude-sonnet-4-5-20250929",
-                max_tokens=2000,
-                system=system_prompt,
+                    model="claude-sonnet-4-5-20250929",
+                    max_tokens=2000,
+                    system=system_prompt,
                 messages=[{"role": "user", "content": user_message}]
             )
             
