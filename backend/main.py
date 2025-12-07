@@ -45,12 +45,22 @@ if production_frontend:
     # Also add without protocol in case
     if production_frontend.startswith('https://'):
         allowed_origins.append(production_frontend.replace('https://', 'http://'))
-    
-    # Also add the Railway domain if custom domain is set (Railway domain still works)
-    railway_domain = os.getenv("RAILWAY_PUBLIC_DOMAIN")
-    if railway_domain:
-        allowed_origins.append(f"https://{railway_domain}")
-        allowed_origins.append(f"http://{railway_domain}")
+
+# Also allow requests from Railway's public domain (for custom domains that proxy through Railway)
+railway_public_domain = os.getenv("RAILWAY_PUBLIC_DOMAIN")
+if railway_public_domain:
+    allowed_origins.append(f"https://{railway_public_domain}")
+    allowed_origins.append(f"http://{railway_public_domain}")
+
+# For custom domains, also allow the custom domain itself
+# You can add your custom domain here or via FRONTEND_URL env var
+custom_domain = os.getenv("CUSTOM_DOMAIN")
+if custom_domain:
+    if not custom_domain.startswith(('http://', 'https://')):
+        allowed_origins.append(f"https://{custom_domain}")
+        allowed_origins.append(f"http://{custom_domain}")
+    else:
+        allowed_origins.append(custom_domain)
 
 app.add_middleware(
     CORSMiddleware,
