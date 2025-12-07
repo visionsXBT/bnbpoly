@@ -172,10 +172,15 @@ class PolymarketClient:
                         title = market.get('question') or market.get('title') or market.get('name', 'N/A')
                         print(f"  Result {i}: {title[:100]}")
                     
-                    # If results seem irrelevant, try filtering by checking if query terms appear
-                    # But first, let's see if the API is actually using the q parameter
-                    # If all results are unrelated, the q parameter might not be working
-                    return markets
+                    # Filter results to ensure they actually match the query
+                    # Polymarket's q parameter might not be working correctly
+                    filtered = self._filter_markets_by_query_relevance(markets, query)
+                    print(f"After filtering for query relevance: {len(filtered)} markets match")
+                    if filtered:
+                        return filtered[:limit]
+                    # If filtering removed all results, the API search didn't work - return empty
+                    print("Warning: All search results were filtered out - API search may not be working correctly")
+                    return []
             except Exception as e:
                 print(f"API search with 'q' parameter failed: {e}")
                 import traceback
@@ -197,7 +202,11 @@ class PolymarketClient:
                 
                 if markets and len(markets) > 0:
                     print(f"Polymarket API search (no date filter) returned {len(markets)} markets for query: '{query}'")
-                    return markets
+                    # Filter results to ensure they actually match the query
+                    filtered = self._filter_markets_by_query_relevance(markets, query)
+                    if filtered:
+                        return filtered[:limit]
+                    return []
             except Exception as e:
                 print(f"API search without date filter failed: {e}")
             
@@ -209,6 +218,71 @@ class PolymarketClient:
             import traceback
             traceback.print_exc()
             return []
+    
+    def _filter_markets_by_query_relevance(self, markets: List[Dict], query: str) -> List[Dict]:
+        """Filter markets to only include those that actually match the query terms."""
+        import re
+        
+        # Extract meaningful terms from query (remove stop words)
+        query_lower = query.lower()
+        query_words = set(re.findall(r'\b\w+\b', query_lower))
+        stop_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 
+                     'will', 'be', 'is', 'are', 'was', 'were', 'have', 'has', 'had', 'do', 'does', 'did', 
+                     'can', 'could', 'should', 'would', 'may', 'might', 'must', 'what', 'when', 'where', 
+                     'who', 'why', 'how'}
+        # Don't remove 'networth', 'net', 'worth' - they might be important
+        query_words = {w for w in query_words if w not in stop_words and len(w) > 1}
+        
+        # Separate subject terms from date terms
+        subject_terms = []
+        date_terms = []
+        for word in query_words:
+            if word.isdigit() or (word.replace('.', '').replace('-', '').isdigit()):
+                date_terms.append(word)
+            else:
+                subject_terms.append(word.lower())
+        
+        print(f"Filtering markets - Subject terms: {subject_terms}, Date terms: {date_terms}")
+        
+        # Require at least one subject term to match (not just dates)
+        if not subject_terms:
+            # If no subject terms, just check for any term match
+            subject_terms = [w.lower() for w in query_words if len(w) > 1]
+        
+        filtered_markets = []
+        skipped_count = 0
+        
+        for market in markets:
+            if market.get('closed', False):
+                continue
+            
+            question = str(market.get('question', '') or '').lower()
+            title = str(market.get('title', '') or market.get('name', '') or '').lower()
+            slug = str(market.get('slug', '') or '').lower()
+            market_text = f"{question} {title} {slug}"
+            
+            # Check if any subject term appears in the market
+            matched_subject_terms = [term for term in subject_terms if term in market_text]
+            matched_count = len(matched_subject_terms)
+            
+            # Require at least 1 subject term match (unless query has no subject terms)
+            if len(subject_terms) > 0 and matched_count == 0:
+                skipped_count += 1
+                if skipped_count <= 3:  # Log first 3 skipped markets
+                    print(f"  Skipping: '{question[:60]}...' - no subject term matches")
+                continue  # Skip markets that don't match any subject terms
+            
+            # If we have subject terms, require at least one match
+            if len(subject_terms) > 0 and matched_count > 0:
+                print(f"  Keeping: '{question[:60]}...' - matched terms: {matched_subject_terms}")
+                filtered_markets.append(market)
+            elif len(subject_terms) == 0:
+                # If no subject terms, check for any query word match
+                if any(word in market_text for word in query_words):
+                    filtered_markets.append(market)
+        
+        print(f"Filtered {len(markets)} markets down to {len(filtered_markets)} matching markets")
+        return filtered_markets
     
     def _filter_markets_by_relevance(self, markets: List[Dict], query: str, strict: bool = True) -> List[Dict]:
         """Filter and score markets by relevance to query. Strict mode only returns strong matches."""
