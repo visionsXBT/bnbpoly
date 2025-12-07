@@ -51,22 +51,44 @@ class InsightGenerator:
                 context_parts.append(market_info)
                 
                 # Extract outcomes/choices from market if available
-                if 'outcomes' in market or 'tokens' in market:
-                    outcomes = market.get('outcomes') or market.get('tokens')
-                    if outcomes:
-                        if isinstance(outcomes, list):
-                            choice_list = []
-                            for o in outcomes:
-                                if isinstance(o, dict):
-                                    choice_list.append(str(o.get('name', o.get('title', 'Unknown'))))
-                                else:
-                                    choice_list.append(str(o))
-                            if choice_list:
-                                context_parts.append(f"  Choices: {', '.join(choice_list)}")
-                        elif isinstance(outcomes, dict):
-                            choices = [str(k) for k in outcomes.keys()]
-                            if choices:
-                                context_parts.append(f"  Choices: {', '.join(choices)}")
+                # Try multiple field names that Polymarket might use
+                outcomes = (market.get('outcomes') or 
+                           market.get('tokens') or 
+                           market.get('conditions') or
+                           market.get('markets') or
+                           market.get('selections') or
+                           market.get('options'))
+                if outcomes:
+                    if isinstance(outcomes, list):
+                        choice_list = []
+                        for o in outcomes:
+                            if isinstance(o, dict):
+                                choice_name = (o.get('name') or 
+                                             o.get('title') or 
+                                             o.get('tokenName') or
+                                             o.get('label') or
+                                             o.get('outcome') or
+                                             o.get('option') or
+                                             'Unknown')
+                                choice_list.append(str(choice_name))
+                            else:
+                                choice_list.append(str(o))
+                        if choice_list:
+                            context_parts.append(f"  Choices: {', '.join(choice_list)}")
+                    elif isinstance(outcomes, dict):
+                        choices = []
+                        for k, v in outcomes.items():
+                            if isinstance(v, dict):
+                                choice_name = (v.get('name') or 
+                                             v.get('title') or 
+                                             v.get('tokenName') or
+                                             v.get('label') or
+                                             k)
+                                choices.append(str(choice_name))
+                            else:
+                                choices.append(str(k))
+                        if choices:
+                            context_parts.append(f"  Choices: {', '.join(choices)}")
         
         if market_details:
             formatted_details = {}
@@ -79,21 +101,48 @@ class InsightGenerator:
                 context_parts.append(f"Question: {question}")
             
             # Extract outcomes/choices from market_details
-            outcomes_data = market_details.get('outcomes') or market_details.get('tokens') or market_details.get('conditions') or market_details.get('prices')
+            # Try multiple field names that Polymarket might use
+            outcomes_data = (market_details.get('outcomes') or 
+                           market_details.get('tokens') or 
+                           market_details.get('conditions') or 
+                           market_details.get('prices') or
+                           market_details.get('markets') or  # Sometimes outcomes are nested in markets
+                           market_details.get('selections') or  # Alternative field name
+                           market_details.get('options'))  # Another possible field name
+            
             if outcomes_data:
                 context_parts.append(f"\nMarket Choices/Outcomes:")
                 if isinstance(outcomes_data, list):
                     for i, outcome in enumerate(outcomes_data):
                         if isinstance(outcome, dict):
-                            outcome_name = outcome.get('name') or outcome.get('title') or outcome.get('outcome') or f"Choice {i+1}"
-                            outcome_price = outcome.get('price') or outcome.get('probability')
-                            outcome_volume = outcome.get('volume')
+                            outcome_name = (outcome.get('name') or 
+                                          outcome.get('title') or 
+                                          outcome.get('outcome') or 
+                                          outcome.get('tokenName') or  # Common in Polymarket
+                                          outcome.get('label') or
+                                          outcome.get('option') or
+                                          f"Choice {i+1}")
+                            outcome_price = (outcome.get('price') or 
+                                           outcome.get('probability') or
+                                           outcome.get('yesPrice') or  # Polymarket uses yesPrice
+                                           outcome.get('noPrice'))
+                            outcome_volume = (outcome.get('volume') or
+                                            outcome.get('volumeNum') or
+                                            outcome.get('liquidity') or
+                                            outcome.get('liquidityNum'))
                             
                             outcome_str = f"- {outcome_name}"
                             if outcome_price is not None:
-                                outcome_str += f" | Price: {outcome_price}"
+                                # Format price as percentage if it's a decimal
+                                if isinstance(outcome_price, (int, float)):
+                                    if outcome_price <= 1:
+                                        outcome_str += f" | Probability: {outcome_price*100:.1f}%"
+                                    else:
+                                        outcome_str += f" | Price: {outcome_price}"
+                                else:
+                                    outcome_str += f" | Price: {outcome_price}"
                             if outcome_volume is not None:
-                                outcome_str += f" | Volume: ${outcome_volume:,.2f}" if isinstance(outcome_volume, (int, float)) else f" | Volume: {outcome_volume}"
+                                outcome_str += f" | Volume: ${float(outcome_volume):,.0f}" if isinstance(outcome_volume, (int, float)) else f" | Volume: {outcome_volume}"
                             context_parts.append(outcome_str)
                         elif isinstance(outcome, str):
                             context_parts.append(f"- {outcome}")
@@ -102,9 +151,28 @@ class InsightGenerator:
                 elif isinstance(outcomes_data, dict):
                     for key, value in outcomes_data.items():
                         if isinstance(value, dict):
-                            outcome_name = value.get('name') or value.get('title') or key
-                            outcome_price = value.get('price') or value.get('probability')
-                            context_parts.append(f"- {outcome_name}" + (f" | Price: {outcome_price}" if outcome_price else ""))
+                            outcome_name = value.get('name') or value.get('title') or value.get('tokenName') or key
+                            outcome_price = (value.get('price') or 
+                                           value.get('probability') or
+                                           value.get('yesPrice') or
+                                           value.get('noPrice'))
+                            outcome_volume = (value.get('volume') or
+                                            value.get('volumeNum') or
+                                            value.get('liquidity') or
+                                            value.get('liquidityNum'))
+                            
+                            outcome_str = f"- {outcome_name}"
+                            if outcome_price is not None:
+                                if isinstance(outcome_price, (int, float)):
+                                    if outcome_price <= 1:
+                                        outcome_str += f" | Probability: {outcome_price*100:.1f}%"
+                                    else:
+                                        outcome_str += f" | Price: {outcome_price}"
+                                else:
+                                    outcome_str += f" | Price: {outcome_price}"
+                            if outcome_volume is not None:
+                                outcome_str += f" | Volume: ${float(outcome_volume):,.0f}" if isinstance(outcome_volume, (int, float)) else f" | Volume: {outcome_volume}"
+                            context_parts.append(outcome_str)
                         else:
                             context_parts.append(f"- {key}: {value}")
             

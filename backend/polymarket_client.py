@@ -276,7 +276,8 @@ class PolymarketClient:
             # Keep common important terms
             elif word in ['bitcoin', 'btc', 'ethereum', 'eth', 'price', 'hit', 'reach', 'election', 'win', 'trump', 'biden',
                          'uefa', 'champions', 'league', 'premier', 'nba', 'nfl', 'super', 'bowl', 'nhl', 'mlb',
-                         'arsenal', 'madrid', 'barcelona', 'bayern', 'munich', 'psg', 'liverpool', 'chelsea', 'city']:
+                         'arsenal', 'madrid', 'barcelona', 'bayern', 'munich', 'psg', 'liverpool', 'chelsea', 'city',
+                         'say', 'mention', 'tonight', 'show', 'altman', 'sam']:
                 important_terms.append(word)
         
         scored_markets = []
