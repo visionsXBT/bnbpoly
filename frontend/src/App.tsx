@@ -32,7 +32,17 @@ function App() {
   const [isLoading, setIsLoading] = useState<boolean>(false)
   const [trendingMarkets, setTrendingMarkets] = useState<Market[]>([])
   const [language, setLanguage] = useState<'en' | 'zh'>('en')
-  const [showLanding, setShowLanding] = useState<boolean>(true)
+  // Check if user has already entered (persist across refreshes)
+  const [showLanding, setShowLanding] = useState<boolean>(() => {
+    // Check localStorage to see if user has already entered
+    const hasEntered = localStorage.getItem('hasEnteredLanding')
+    return !hasEntered
+  })
+  
+  const handleEnterLanding = () => {
+    localStorage.setItem('hasEnteredLanding', 'true')
+    setShowLanding(false)
+  }
   const messagesEndRef = useRef<HTMLDivElement>(null)
   
   // Translation function
@@ -296,7 +306,7 @@ function App() {
   if (showLanding) {
     return (
       <LandingPage 
-        onEnter={() => setShowLanding(false)} 
+        onEnter={handleEnterLanding} 
         language={language}
       />
     )
