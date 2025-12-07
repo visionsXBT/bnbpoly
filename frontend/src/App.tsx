@@ -35,12 +35,21 @@ function App() {
   // Check if user has already entered (persist across refreshes)
   const [showLanding, setShowLanding] = useState<boolean>(() => {
     // Check localStorage to see if user has already entered
-    const hasEntered = localStorage.getItem('hasEnteredLanding')
-    return !hasEntered
+    try {
+      const hasEntered = localStorage.getItem('hasEnteredLanding')
+      return !hasEntered
+    } catch (e) {
+      // If localStorage is not available, show landing page
+      return true
+    }
   })
   
   const handleEnterLanding = () => {
-    localStorage.setItem('hasEnteredLanding', 'true')
+    try {
+      localStorage.setItem('hasEnteredLanding', 'true')
+    } catch (e) {
+      // Ignore localStorage errors
+    }
     setShowLanding(false)
   }
   const messagesEndRef = useRef<HTMLDivElement>(null)
