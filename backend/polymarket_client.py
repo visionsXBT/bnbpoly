@@ -130,7 +130,7 @@ class PolymarketClient:
             return []
     
     async def search_markets(self, query: str, limit: int = 20) -> List[Dict]:
-        """Search for markets by query string. Uses full query and trusts Polymarket API search."""
+        """Search for markets by query string. Uses Polymarket API search directly."""
         try:
             from datetime import datetime, timedelta
             
@@ -138,15 +138,15 @@ class PolymarketClient:
             current_date = datetime.now()
             min_end_date = (current_date + timedelta(days=1)).isoformat() + 'Z'
             
-            # Strategy 1: Use full query with Polymarket API search parameter
-            # Trust Polymarket's search algorithm - it should handle matching
+            # Use Polymarket's built-in search - trust their algorithm
+            # The 'q' parameter searches across question, slug, and other fields
             params = {
-                "limit": limit * 3,  # Fetch more to filter strictly
-                "q": query,  # Use full query exactly as provided
+                "limit": limit,  # Request exactly what we need
+                "q": query,  # Full user query - Polymarket handles the matching
                 "active": "true",
                 "closed": "false",
-                "end_date_min": min_end_date,
-                "order": "volumeNum",
+                "end_date_min": min_end_date,  # Only future markets
+                "order": "volumeNum",  # Order by volume (most relevant first)
                 "ascending": "false"
             }
             
@@ -156,18 +156,15 @@ class PolymarketClient:
                 markets = response.json()
                 
                 if markets and len(markets) > 0:
-                    print(f"API search returned {len(markets)} markets for query: {query}")
-                    # Strict filtering - only return markets that actually match the query
-                    filtered = self._filter_markets_by_relevance(markets, query, strict=True)
-                    print(f"After strict filtering: {len(filtered)} markets match")
-                    if filtered:
-                        return filtered[:limit]
+                    print(f"Polymarket API search returned {len(markets)} markets for query: '{query}'")
+                    # Return results directly - Polymarket's search should be accurate
+                    return markets
             except Exception as e:
                 print(f"API search with 'q' parameter failed: {e}")
             
-            # Strategy 2: Try without date filter (some markets might not have end dates)
+            # Fallback: Try without date filter (some markets might not have end dates)
             params = {
-                "limit": limit * 2,
+                "limit": limit,
                 "q": query,
                 "active": "true",
                 "closed": "false",
@@ -181,39 +178,13 @@ class PolymarketClient:
                 markets = response.json()
                 
                 if markets and len(markets) > 0:
-                    filtered = self._filter_markets_by_relevance(markets, query, strict=True)
-                    if filtered:
-                        return filtered[:limit]
+                    print(f"Polymarket API search (no date filter) returned {len(markets)} markets for query: '{query}'")
+                    return markets
             except Exception as e:
                 print(f"API search without date filter failed: {e}")
             
-            # Strategy 3: If API search returns nothing, try fetching and filtering
-            # But only if we have a reasonable match threshold
-            # NOTE: This fallback should rarely be needed if API search works
-            print("API search returned no results, trying fallback strategy...")
-            params = {
-                "limit": limit * 20,  # Fetch more markets
-                "active": "true",
-                "closed": "false",
-                "order": "volumeNum",
-                "ascending": "false"
-            }
-            
-            try:
-                response = await self.client.get(url, params=params)
-                response.raise_for_status()
-                all_markets = response.json()
-                
-                if all_markets:
-                    print(f"Fallback: fetched {len(all_markets)} markets, filtering for query: {query}")
-                    # Very strict filtering - only return if there's a strong match
-                    filtered = self._filter_markets_by_relevance(all_markets, query, strict=True)
-                    print(f"Fallback: after filtering, {len(filtered)} markets match")
-                    if filtered:
-                        return filtered[:limit]
-            except Exception as e:
-                print(f"Fetching all markets failed: {e}")
-            
+            # If no results, return empty list
+            print(f"No markets found for query: '{query}'")
             return []
         except Exception as e:
             print(f"Error searching markets: {e}")
