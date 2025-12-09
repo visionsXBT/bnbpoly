@@ -124,37 +124,54 @@ class PolymarketClient:
     async def get_market_trades(self, market_id: str, limit: int = 50) -> List[Dict]:
         """Fetch recent trades for a specific market."""
         try:
+            # Try Gamma API trades endpoint
             url = f"{self.api_url}/markets/{market_id}/trades"
             params = {"limit": limit}
-            response = await self.client.get(url, params=params)
+            response = await self.client.get(url, params=params, timeout=10.0)
             
             # Handle 404 gracefully - some markets don't have trades endpoint
             if response.status_code == 404:
                 return []
             
             response.raise_for_status()
-            trades = response.json()
+            trades_data = response.json()
+            
+            # Handle both array and object responses
+            if isinstance(trades_data, dict):
+                trades = trades_data.get("trades", trades_data.get("data", []))
+            else:
+                trades = trades_data if isinstance(trades_data, list) else []
             
             # Format trades consistently
             formatted_trades = []
             for trade in trades:
+                if not isinstance(trade, dict):
+                    continue
+                    
                 formatted_trade = {
-                    "id": trade.get("id") or trade.get("tradeId"),
+                    "id": trade.get("id") or trade.get("tradeId") or trade.get("trade_id"),
                     "market_id": market_id,
-                    "timestamp": trade.get("timestamp") or trade.get("time") or trade.get("match_time") or trade.get("created_at"),
+                    "timestamp": trade.get("timestamp") or trade.get("time") or trade.get("match_time") or trade.get("created_at") or trade.get("last_update"),
                     "price": trade.get("price") or trade.get("priceNum"),
                     "size": trade.get("size") or trade.get("amount") or trade.get("amountNum"),
                     "side": trade.get("side") or trade.get("type") or trade.get("direction"),
                     "outcome": trade.get("outcome"),
-                    "user": trade.get("user") or trade.get("trader") or trade.get("maker_address") or trade.get("taker_address"),
+                    "user": trade.get("user") or trade.get("trader") or trade.get("maker_address") or trade.get("taker_address") or trade.get("owner"),
                 }
-                formatted_trades.append(formatted_trade)
+                
+                # Only add if we have at least an ID or timestamp
+                if formatted_trade["id"] or formatted_trade["timestamp"]:
+                    formatted_trades.append(formatted_trade)
             
             return formatted_trades
+        except httpx.HTTPStatusError as e:
+            # Log HTTP errors but don't fail
+            if e.response.status_code != 404:
+                print(f"HTTP error fetching trades for market {market_id}: {e.response.status_code}")
+            return []
         except Exception as e:
             # Log but don't fail - trades are optional
-            if "404" not in str(e):
-                print(f"Error fetching trades for market {market_id}: {e}")
+            print(f"Error fetching trades for market {market_id}: {e}")
             return []
     
     async def get_recent_trades_from_markets(self, market_ids: List[str], limit_per_market: int = 5) -> List[Dict]:
