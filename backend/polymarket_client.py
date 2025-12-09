@@ -133,12 +133,51 @@ class PolymarketClient:
                 return []
             
             response.raise_for_status()
-            return response.json()
+            trades = response.json()
+            
+            # Format trades consistently
+            formatted_trades = []
+            for trade in trades:
+                formatted_trade = {
+                    "id": trade.get("id") or trade.get("tradeId"),
+                    "market_id": market_id,
+                    "timestamp": trade.get("timestamp") or trade.get("time") or trade.get("match_time") or trade.get("created_at"),
+                    "price": trade.get("price") or trade.get("priceNum"),
+                    "size": trade.get("size") or trade.get("amount") or trade.get("amountNum"),
+                    "side": trade.get("side") or trade.get("type") or trade.get("direction"),
+                    "outcome": trade.get("outcome"),
+                    "user": trade.get("user") or trade.get("trader") or trade.get("maker_address") or trade.get("taker_address"),
+                }
+                formatted_trades.append(formatted_trade)
+            
+            return formatted_trades
         except Exception as e:
             # Log but don't fail - trades are optional
             if "404" not in str(e):
                 print(f"Error fetching trades for market {market_id}: {e}")
             return []
+    
+    async def get_recent_trades_from_markets(self, market_ids: List[str], limit_per_market: int = 5) -> List[Dict]:
+        """Fetch recent trades from multiple markets."""
+        all_trades = []
+        
+        # Fetch trades from all markets concurrently
+        tasks = [self.get_market_trades(mid, limit=limit_per_market) for mid in market_ids]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        for trades in results:
+            if isinstance(trades, list):
+                all_trades.extend(trades)
+            elif isinstance(trades, Exception):
+                print(f"Error fetching trades: {trades}")
+        
+        # Sort by timestamp (most recent first)
+        all_trades.sort(
+            key=lambda x: x.get("timestamp") or "",
+            reverse=True
+        )
+        
+        return all_trades[:50]  # Return top 50 most recent
     
     async def search_markets(self, query: str, limit: int = 20) -> List[Dict]:
         """Search for markets by query string. Uses Polymarket API search directly."""
@@ -494,6 +533,78 @@ class PolymarketClient:
         except Exception as e:
             print(f"Error fetching markets for event {event_slug}: {e}")
             return []
+    
+    async def poll_trades_stream(
+        self,
+        market_ids: List[str],
+        poll_interval: int = 3,
+        callback: Optional[Callable[[Dict], None]] = None
+    ) -> AsyncIterator[Dict]:
+        """
+        Poll for new trades from multiple markets and stream them.
+        This is a polling-based approach since RTDS trades require authentication.
+        
+        Args:
+            market_ids: List of market IDs to poll
+            poll_interval: Seconds between polls
+            callback: Optional callback function to handle each trade
+            
+        Yields:
+            Dict containing trade data
+        """
+        seen_trade_ids = set()
+        
+        while True:
+            try:
+                # Fetch recent trades from all markets
+                recent_trades = await self.get_recent_trades_from_markets(market_ids, limit_per_market=10)
+                
+                # Filter out trades we've already seen
+                new_trades = [t for t in recent_trades if t.get("id") and t.get("id") not in seen_trade_ids]
+                
+                # Sort by timestamp (most recent first)
+                new_trades.sort(
+                    key=lambda x: x.get("timestamp") or "",
+                    reverse=True
+                )
+                
+                # Yield new trades
+                for trade in new_trades:
+                    trade_id = trade.get("id")
+                    if trade_id:
+                        seen_trade_ids.add(trade_id)
+                    
+                    # Get market info for this trade
+                    market_id = trade.get("market_id")
+                    if market_id:
+                        try:
+                            market_info = await self.get_market_by_id(market_id)
+                            if market_info:
+                                trade["question"] = market_info.get("question")
+                        except:
+                            pass  # Continue even if market fetch fails
+                    
+                    # Call callback if provided
+                    if callback:
+                        try:
+                            callback(trade)
+                        except Exception as e:
+                            print(f"Error in callback: {e}")
+                    
+                    yield trade
+                
+                # Clean up old trade IDs to prevent memory growth (keep last 1000)
+                if len(seen_trade_ids) > 1000:
+                    seen_trade_ids = set(list(seen_trade_ids)[-500:])
+                
+                # Wait before next poll
+                await asyncio.sleep(poll_interval)
+                
+            except Exception as e:
+                print(f"Error in poll_trades_stream: {e}")
+                import traceback
+                traceback.print_exc()
+                await asyncio.sleep(poll_interval)
     
     async def stream_trades(
         self, 

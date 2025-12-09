@@ -41,12 +41,19 @@ const LiveTradesRibbon: React.FC<LiveTradesRibbonProps> = ({ apiBaseUrl = '' }) 
           try {
             const message = JSON.parse(event.data);
             
-            if (message.type === 'new_trade' && message.data) {
+            if (message.type === 'connected') {
+              console.log('Live trades connected:', message.message);
+            } else if (message.type === 'new_trade' && message.data) {
               const newTrade = message.data as Trade;
               setTrades(prev => {
+                // Avoid duplicates
+                const exists = prev.some(t => t.id === newTrade.id);
+                if (exists) return prev;
                 const updated = [newTrade, ...prev].slice(0, 50); // Keep last 50 trades
                 return updated;
               });
+            } else if (message.type === 'error') {
+              console.error('Live trades error:', message.message);
             }
           } catch (e) {
             console.error('Error parsing WebSocket message:', e);

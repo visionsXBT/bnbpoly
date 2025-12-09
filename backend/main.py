@@ -286,14 +286,14 @@ async def stream_market_trades(websocket: WebSocket, market_id: str):
 async def stream_all_trades(websocket: WebSocket):
     """
     WebSocket endpoint to stream real-time trades from all active markets.
-    Streams trades from top markets to show live activity.
+    Uses polling since RTDS trades require authentication.
     """
     await websocket.accept()
     print("Client connected to all trades stream")
     
     try:
         # Get top markets to monitor
-        top_markets = await polymarket_client.get_markets(limit=10)
+        top_markets = await polymarket_client.get_markets(limit=20)
         market_ids = [m.get('id') for m in top_markets if m.get('id')]
         
         if not market_ids:
@@ -303,42 +303,31 @@ async def stream_all_trades(websocket: WebSocket):
             })
             return
         
-        print(f"Monitoring {len(market_ids)} markets for live trades")
+        print(f"Polling {len(market_ids)} markets for live trades")
         
-        # Create tasks to stream from multiple markets
-        import asyncio
+        # Send initial message
+        await websocket.send_json({
+            "type": "connected",
+            "message": f"Monitoring {len(market_ids)} markets"
+        })
         
-        async def stream_from_market(market_id: str):
-            """Stream trades from a single market and forward to client."""
+        # Use polling-based stream
+        async for trade in polymarket_client.poll_trades_stream(market_ids, poll_interval=3):
             try:
-                # Get market info for this market
-                market_info = await polymarket_client.get_market_by_id(market_id)
-                market_question = market_info.get('question') if market_info else None
-                
-                async for trade in polymarket_client.stream_trades(market_id):
-                    try:
-                        # Add market question to trade data
-                        trade_with_market = trade.copy()
-                        if market_question:
-                            trade_with_market['question'] = market_question
-                        await websocket.send_json({
-                            "type": "new_trade",
-                            "data": trade_with_market
-                        })
-                    except Exception as e:
-                        print(f"Error sending trade from market {market_id}: {e}")
-                        break
+                await websocket.send_json({
+                    "type": "new_trade",
+                    "data": trade
+                })
             except Exception as e:
-                print(f"Error streaming from market {market_id}: {e}")
-        
-        # Start streaming from all markets concurrently
-        tasks = [stream_from_market(mid) for mid in market_ids]
-        await asyncio.gather(*tasks, return_exceptions=True)
+                print(f"Error sending trade to client: {e}")
+                break
                 
     except WebSocketDisconnect:
         print("Client disconnected from all trades stream")
     except Exception as e:
         print(f"Error in all trades stream: {e}")
+        import traceback
+        traceback.print_exc()
         try:
             await websocket.send_json({
                 "type": "error",
