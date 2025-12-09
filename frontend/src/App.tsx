@@ -203,6 +203,13 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [language])
 
+  // Detect language from message content
+  const detectMessageLanguage = (text: string): 'en' | 'zh' => {
+    // Check if message contains Chinese characters
+    const hasChinese = /[\u4e00-\u9fff]/.test(text)
+    return hasChinese ? 'zh' : 'en'
+  }
+
   const handleSendMessage = async (message: string): Promise<void> => {
     if (!message.trim() || isLoading) return
 
@@ -219,17 +226,22 @@ function App() {
         content: msg.content
       }))
       
+      // Detect language from the user's message (not site setting)
+      // Response language should match the prompt language
+      const messageLanguage = detectMessageLanguage(message)
+      
       // Ensure no double slashes in URL
       const baseUrl = API_BASE_URL.endsWith('/') ? API_BASE_URL.slice(0, -1) : API_BASE_URL
       const apiUrl = `${baseUrl}/api/chat`
       console.log('API_BASE_URL:', API_BASE_URL)
       console.log('Sending request to:', apiUrl)
+      console.log('Detected message language:', messageLanguage, '(site setting:', language, ')')
       
       const response = await axios.post<ChatResponse>(apiUrl, {
         message: message,
         search_query: message.toLowerCase().includes('search') ? message : null,
         conversation_history: conversationHistory,
-        language: language
+        language: messageLanguage  // Use detected message language, not site setting
       }, {
         timeout: 60000 // 60 second timeout
       })
