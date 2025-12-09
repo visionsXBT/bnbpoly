@@ -32,7 +32,7 @@ export interface PriceUpdate {
   current_price?: number;
   previous_price?: number;
   price_change?: number;
-  price_direction?: 'up' | 'down';
+  price_direction?: 'up' | 'down' | 'neutral';
   lastTradePrice?: number;
   bestBid?: number;
   bestAsk?: number;
