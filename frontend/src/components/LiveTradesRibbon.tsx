@@ -138,26 +138,31 @@ const LiveTradesRibbon: React.FC<LiveTradesRibbonProps> = ({ apiBaseUrl = '' }) 
             {isConnected ? 'Monitoring price changes...' : 'Connecting...'}
           </div>
         ) : (
-          priceUpdates.map((update, index) => (
-            <div key={`${update.market_id}-${update.timestamp}-${index}`} className={`ribbon-price-item price-${update.price_direction || 'neutral'}`}>
-              <span className="price-market">{formatMarket(update.question, update.market_id)}</span>
-              <span className="price-arrow"> &gt; </span>
-              <span className="price-label">PRICE</span>
-              <span className="price-value">{formatPrice(update.current_price || update.lastTradePrice)}</span>
-              {update.price_direction && update.price_direction !== 'neutral' && (
-                <>
-                  <span className={`price-direction price-${update.price_direction}`}>
-                    {update.price_direction === 'up' ? '↑' : '↓'}
-                  </span>
-                  {update.price_change !== undefined && update.previous_price && update.previous_price > 0 && (
-                    <span className={`price-change price-${update.price_direction}`}>
-                      {formatPriceChange(update.price_change / update.previous_price)}
-                    </span>
+          <>
+            <div className="ribbon-trades-scroll-wrapper">
+              {/* Duplicate items for seamless loop */}
+              {[...priceUpdates, ...priceUpdates].map((update, index) => (
+                <div key={`${update.market_id}-${update.timestamp}-${index}`} className={`ribbon-price-item price-${update.price_direction || 'neutral'}`}>
+                  <span className="price-market">{formatMarket(update.question, update.market_id)}</span>
+                  <span className="price-arrow"> &gt; </span>
+                  <span className="price-label">PRICE</span>
+                  <span className="price-value">{formatPrice(update.current_price || update.lastTradePrice)}</span>
+                  {update.price_direction && update.price_direction !== 'neutral' && (
+                    <>
+                      <span className={`price-direction price-${update.price_direction}`}>
+                        {update.price_direction === 'up' ? '↑' : '↓'}
+                      </span>
+                      {update.price_change !== undefined && update.previous_price && update.previous_price > 0 && (
+                        <span className={`price-change price-${update.price_direction}`}>
+                          {formatPriceChange(update.price_change / update.previous_price)}
+                        </span>
+                      )}
+                    </>
                   )}
-                </>
-              )}
+                </div>
+              ))}
             </div>
-          ))
+          </>
         )}
       </div>
     </div>

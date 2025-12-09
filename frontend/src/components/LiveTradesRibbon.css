@@ -54,25 +54,33 @@
 
 .ribbon-trades-scroll {
   flex: 1;
-  overflow-x: auto;
-  overflow-y: hidden;
+  overflow: hidden;
   display: flex;
   align-items: center;
   gap: 16px;
   white-space: nowrap;
-  scroll-behavior: smooth;
+  position: relative;
 }
 
-.ribbon-trades-scroll::-webkit-scrollbar {
-  height: 2px;
+.ribbon-trades-scroll-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  animation: scroll-horizontal 30s linear infinite;
+  will-change: transform;
 }
 
-.ribbon-trades-scroll::-webkit-scrollbar-track {
-  background: #1a1a1a;
+.ribbon-trades-scroll:hover .ribbon-trades-scroll-wrapper {
+  animation-play-state: paused;
 }
 
-.ribbon-trades-scroll::-webkit-scrollbar-thumb {
-  background: #FFFF00;
+@keyframes scroll-horizontal {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
 }
 
 .ribbon-no-trades {
@@ -91,7 +99,6 @@
   color: #FFFFFF;
   white-space: nowrap;
   flex-shrink: 0;
-  animation: slideIn 0.3s ease-out;
 }
 
 .ribbon-price-item.price-up {
@@ -100,6 +107,11 @@
 
 .ribbon-price-item.price-down {
   border-left: 3px solid #f44336;
+}
+
+/* New items slide in */
+.ribbon-price-item:first-child {
+  animation: slideIn 0.5s ease-out;
 }
 
 @keyframes slideIn {
