@@ -26,6 +26,22 @@ export interface Trade {
   question?: string; // Market question/title
 }
 
+export interface PriceUpdate {
+  market_id: string;
+  question?: string;
+  current_price?: number;
+  previous_price?: number;
+  price_change?: number;
+  price_direction?: 'up' | 'down';
+  lastTradePrice?: number;
+  bestBid?: number;
+  bestAsk?: number;
+  oneHourPriceChange?: number;
+  oneDayPriceChange?: number;
+  volume24hr?: number;
+  timestamp?: string;
+}
+
 export interface TradeStreamMessage {
   type: 'recent_trades' | 'new_trade' | 'error';
   data?: Trade[] | Trade;

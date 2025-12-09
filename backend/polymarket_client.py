@@ -174,27 +174,33 @@ class PolymarketClient:
             print(f"Error fetching trades for market {market_id}: {e}")
             return []
     
-    async def get_recent_trades_from_markets(self, market_ids: List[str], limit_per_market: int = 5) -> List[Dict]:
-        """Fetch recent trades from multiple markets."""
-        all_trades = []
+    async def get_market_prices(self, market_ids: List[str]) -> List[Dict]:
+        """Fetch current prices for multiple markets."""
+        price_updates = []
         
-        # Fetch trades from all markets concurrently
-        tasks = [self.get_market_trades(mid, limit=limit_per_market) for mid in market_ids]
+        # Fetch market data from all markets concurrently
+        tasks = [self.get_market_by_id(mid) for mid in market_ids]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
-        for trades in results:
-            if isinstance(trades, list):
-                all_trades.extend(trades)
-            elif isinstance(trades, Exception):
-                print(f"Error fetching trades: {trades}")
+        for i, market_data in enumerate(results):
+            if isinstance(market_data, dict) and market_data:
+                market_id = market_ids[i]
+                price_update = {
+                    "market_id": market_id,
+                    "question": market_data.get("question"),
+                    "lastTradePrice": market_data.get("lastTradePrice"),
+                    "bestBid": market_data.get("bestBid"),
+                    "bestAsk": market_data.get("bestAsk"),
+                    "oneHourPriceChange": market_data.get("oneHourPriceChange"),
+                    "oneDayPriceChange": market_data.get("oneDayPriceChange"),
+                    "volume24hr": market_data.get("volume24hr"),
+                    "timestamp": datetime.now().isoformat(),
+                }
+                price_updates.append(price_update)
+            elif isinstance(market_data, Exception):
+                print(f"Error fetching market {market_ids[i]}: {market_data}")
         
-        # Sort by timestamp (most recent first)
-        all_trades.sort(
-            key=lambda x: x.get("timestamp") or "",
-            reverse=True
-        )
-        
-        return all_trades[:50]  # Return top 50 most recent
+        return price_updates
     
     async def search_markets(self, query: str, limit: int = 20) -> List[Dict]:
         """Search for markets by query string. Uses Polymarket API search directly."""
@@ -551,74 +557,78 @@ class PolymarketClient:
             print(f"Error fetching markets for event {event_slug}: {e}")
             return []
     
-    async def poll_trades_stream(
+    async def poll_price_updates_stream(
         self,
         market_ids: List[str],
-        poll_interval: int = 3,
+        poll_interval: int = 5,
         callback: Optional[Callable[[Dict], None]] = None
     ) -> AsyncIterator[Dict]:
         """
-        Poll for new trades from multiple markets and stream them.
-        This is a polling-based approach since RTDS trades require authentication.
+        Poll for price updates from multiple markets and stream changes.
         
         Args:
             market_ids: List of market IDs to poll
             poll_interval: Seconds between polls
-            callback: Optional callback function to handle each trade
+            callback: Optional callback function to handle each price update
             
         Yields:
-            Dict containing trade data
+            Dict containing price update data with change direction
         """
-        seen_trade_ids = set()
+        previous_prices: Dict[str, float] = {}
         
         while True:
             try:
-                # Fetch recent trades from all markets
-                recent_trades = await self.get_recent_trades_from_markets(market_ids, limit_per_market=10)
+                # Fetch current prices from all markets
+                price_updates = await self.get_market_prices(market_ids)
                 
-                # Filter out trades we've already seen
-                new_trades = [t for t in recent_trades if t.get("id") and t.get("id") not in seen_trade_ids]
-                
-                # Sort by timestamp (most recent first)
-                new_trades.sort(
-                    key=lambda x: x.get("timestamp") or "",
-                    reverse=True
-                )
-                
-                # Yield new trades
-                for trade in new_trades:
-                    trade_id = trade.get("id")
-                    if trade_id:
-                        seen_trade_ids.add(trade_id)
+                # Compare with previous prices and yield changes
+                for update in price_updates:
+                    market_id = update.get("market_id")
+                    current_price = update.get("lastTradePrice")
                     
-                    # Get market info for this trade
-                    market_id = trade.get("market_id")
-                    if market_id:
-                        try:
-                            market_info = await self.get_market_by_id(market_id)
-                            if market_info:
-                                trade["question"] = market_info.get("question")
-                        except:
-                            pass  # Continue even if market fetch fails
+                    if not market_id or current_price is None:
+                        continue
                     
-                    # Call callback if provided
-                    if callback:
-                        try:
-                            callback(trade)
-                        except Exception as e:
-                            print(f"Error in callback: {e}")
+                    # Convert to float if it's a string
+                    try:
+                        current_price_float = float(current_price) if isinstance(current_price, str) else current_price
+                    except (ValueError, TypeError):
+                        continue
                     
-                    yield trade
-                
-                # Clean up old trade IDs to prevent memory growth (keep last 1000)
-                if len(seen_trade_ids) > 1000:
-                    seen_trade_ids = set(list(seen_trade_ids)[-500:])
+                    # Check if price changed
+                    previous_price = previous_prices.get(market_id)
+                    
+                    if previous_price is not None and previous_price > 0:
+                        price_change = current_price_float - previous_price
+                        price_change_percent = abs(price_change / previous_price)
+                        
+                        # Only yield if price changed significantly (more than 0.1%)
+                        if price_change_percent > 0.001:
+                            update["price_change"] = price_change
+                            update["price_direction"] = "up" if price_change > 0 else "down"
+                            update["previous_price"] = previous_price
+                            update["current_price"] = current_price_float
+                            
+                            # Call callback if provided
+                            if callback:
+                                try:
+                                    callback(update)
+                                except Exception as e:
+                                    print(f"Error in callback: {e}")
+                            
+                            yield update
+                    elif previous_price is None:
+                        # First time seeing this market - store price but don't yield
+                        pass
+                    
+                    # Update stored price
+                    previous_prices[market_id] = current_price_float
                 
                 # Wait before next poll
                 await asyncio.sleep(poll_interval)
                 
             except Exception as e:
-                print(f"Error in poll_trades_stream: {e}")
+                print(f"Error in poll_price_updates_stream: {e}")
                 import traceback
                 traceback.print_exc()
                 await asyncio.sleep(poll_interval)

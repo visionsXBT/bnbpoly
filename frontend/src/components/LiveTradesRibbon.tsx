@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import type { Trade } from '../types';
+import type { PriceUpdate } from '../types';
 import './LiveTradesRibbon.css';
 
 interface LiveTradesRibbonProps {
@@ -7,7 +7,7 @@ interface LiveTradesRibbonProps {
 }
 
 const LiveTradesRibbon: React.FC<LiveTradesRibbonProps> = ({ apiBaseUrl = '' }) => {
-  const [trades, setTrades] = useState<Trade[]>([]);
+  const [priceUpdates, setPriceUpdates] = useState<PriceUpdate[]>([]);
   const [isConnected, setIsConnected] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -42,18 +42,24 @@ const LiveTradesRibbon: React.FC<LiveTradesRibbonProps> = ({ apiBaseUrl = '' }) 
             const message = JSON.parse(event.data);
             
             if (message.type === 'connected') {
-              console.log('Live trades connected:', message.message);
-            } else if (message.type === 'new_trade' && message.data) {
-              const newTrade = message.data as Trade;
-              setTrades(prev => {
-                // Avoid duplicates
-                const exists = prev.some(t => t.id === newTrade.id);
+              console.log('Price updates connected:', message.message);
+            } else if (message.type === 'price_update' && message.data) {
+              const priceUpdate = message.data as PriceUpdate;
+              setPriceUpdates(prev => {
+                // Avoid duplicates (same market, same price direction within 1 second)
+                const now = Date.now();
+                const exists = prev.some(p => 
+                  p.market_id === priceUpdate.market_id && 
+                  p.price_direction === priceUpdate.price_direction &&
+                  p.timestamp && 
+                  (now - new Date(p.timestamp).getTime()) < 1000
+                );
                 if (exists) return prev;
-                const updated = [newTrade, ...prev].slice(0, 50); // Keep last 50 trades
+                const updated = [priceUpdate, ...prev].slice(0, 50); // Keep last 50 updates
                 return updated;
               });
             } else if (message.type === 'error') {
-              console.error('Live trades error:', message.message);
+              console.error('Price updates error:', message.message);
             }
           } catch (e) {
             console.error('Error parsing WebSocket message:', e);
@@ -96,28 +102,25 @@ const LiveTradesRibbon: React.FC<LiveTradesRibbonProps> = ({ apiBaseUrl = '' }) 
     };
   }, [apiBaseUrl]);
 
-  const formatAmount = (amount: number | undefined): string => {
-    if (amount === undefined || amount === null) return '';
-    if (amount >= 1000) {
-      return `$${(amount / 1000).toFixed(1)}k`;
-    }
-    return `$${amount.toFixed(2)}`;
+  const formatPrice = (price: number | undefined): string => {
+    if (price === undefined || price === null) return 'N/A';
+    return `$${price.toFixed(4)}`;
   };
 
-  const formatUser = (user: string | undefined): string => {
-    if (!user) return 'Anonymous';
-    // Shorten wallet addresses
-    if (user.length > 10) {
-      return `${user.substring(0, 6)}...${user.substring(user.length - 4)}`;
-    }
-    return user;
-  };
-
-  const formatMarket = (marketId: string, question?: string): string => {
+  const formatMarket = (question?: string, marketId?: string): string => {
     if (question) {
-      return question.length > 50 ? question.substring(0, 50) + '...' : question;
+      return question.length > 40 ? question.substring(0, 40) + '...' : question;
     }
-    return marketId.substring(0, 20) + '...';
+    if (marketId) {
+      return marketId.substring(0, 20) + '...';
+    }
+    return 'Unknown Market';
+  };
+
+  const formatPriceChange = (change: number | undefined): string => {
+    if (change === undefined || change === null) return '';
+    const sign = change > 0 ? '+' : '';
+    return `${sign}${(change * 100).toFixed(2)}%`;
   };
 
   return (
@@ -127,21 +130,28 @@ const LiveTradesRibbon: React.FC<LiveTradesRibbonProps> = ({ apiBaseUrl = '' }) 
         <span className="status-text">{isConnected ? 'LIVE' : 'Connecting...'}</span>
       </div>
       <div className="ribbon-trades-scroll">
-        {trades.length === 0 ? (
+        {priceUpdates.length === 0 ? (
           <div className="ribbon-no-trades">
-            {isConnected ? 'Waiting for trades...' : 'Connecting...'}
+            {isConnected ? 'Monitoring price changes...' : 'Connecting...'}
           </div>
         ) : (
-          trades.map((trade, index) => (
-            <div key={trade.id || index} className="ribbon-trade-item">
-              <span className="trade-user">{formatUser(trade.user)}</span>
-              <span className="trade-arrow"> &gt; </span>
-              <span className={`trade-side trade-${trade.side || 'unknown'}`}>
-                {trade.side?.toUpperCase() || 'TRADE'}
-              </span>
-              <span className="trade-market"> {formatMarket(trade.market_id, trade.question || trade.outcome)}</span>
-              {trade.size && (
-                <span className="trade-amount"> {formatAmount(trade.size)}</span>
+          priceUpdates.map((update, index) => (
+            <div key={`${update.market_id}-${update.timestamp}-${index}`} className={`ribbon-price-item price-${update.price_direction || 'neutral'}`}>
+              <span className="price-market">{formatMarket(update.question, update.market_id)}</span>
+              <span className="price-arrow"> &gt; </span>
+              <span className="price-label">PRICE</span>
+              <span className="price-value">{formatPrice(update.current_price || update.lastTradePrice)}</span>
+              {update.price_direction && (
+                <>
+                  <span className={`price-direction price-${update.price_direction}`}>
+                    {update.price_direction === 'up' ? '↑' : '↓'}
+                  </span>
+                  {update.price_change !== undefined && (
+                    <span className={`price-change price-${update.price_direction}`}>
+                      {formatPriceChange(update.price_change / (update.previous_price || 1))}
+                    </span>
+                  )}
+                </>
               )}
             </div>
           ))

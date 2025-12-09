@@ -283,17 +283,17 @@ async def stream_market_trades(websocket: WebSocket, market_id: str):
 
 
 @app.websocket("/api/trades/stream")
-async def stream_all_trades(websocket: WebSocket):
+async def stream_price_updates(websocket: WebSocket):
     """
-    WebSocket endpoint to stream real-time trades from all active markets.
-    Uses polling since RTDS trades require authentication.
+    WebSocket endpoint to stream price updates from all active markets.
+    Shows price changes (up/down) instead of individual trades.
     """
     await websocket.accept()
-    print("Client connected to all trades stream")
+    print("Client connected to price updates stream")
     
     try:
         # Get top markets to monitor
-        top_markets = await polymarket_client.get_markets(limit=20)
+        top_markets = await polymarket_client.get_markets(limit=30)
         market_ids = [m.get('id') for m in top_markets if m.get('id')]
         
         if not market_ids:
@@ -303,29 +303,29 @@ async def stream_all_trades(websocket: WebSocket):
             })
             return
         
-        print(f"Polling {len(market_ids)} markets for live trades")
+        print(f"Monitoring {len(market_ids)} markets for price updates")
         
         # Send initial message
         await websocket.send_json({
             "type": "connected",
-            "message": f"Monitoring {len(market_ids)} markets"
+            "message": f"Monitoring {len(market_ids)} markets for price changes"
         })
         
-        # Use polling-based stream
-        async for trade in polymarket_client.poll_trades_stream(market_ids, poll_interval=3):
+        # Use polling-based price update stream
+        async for price_update in polymarket_client.poll_price_updates_stream(market_ids, poll_interval=5):
             try:
                 await websocket.send_json({
-                    "type": "new_trade",
-                    "data": trade
+                    "type": "price_update",
+                    "data": price_update
                 })
             except Exception as e:
-                print(f"Error sending trade to client: {e}")
+                print(f"Error sending price update to client: {e}")
                 break
                 
     except WebSocketDisconnect:
-        print("Client disconnected from all trades stream")
+        print("Client disconnected from price updates stream")
     except Exception as e:
-        print(f"Error in all trades stream: {e}")
+        print(f"Error in price updates stream: {e}")
         import traceback
         traceback.print_exc()
         try:
