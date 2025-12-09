@@ -1,11 +1,12 @@
 """
 FastAPI backend server for Polymarket insights chatbot.
 """
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List
 import os
+import json
 from dotenv import load_dotenv
 from polymarket_client import PolymarketClient
 from insight_generator import InsightGenerator
@@ -233,6 +234,52 @@ async def get_market_trades(market_id: str, limit: int = 50):
         return {"trades": trades}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching trades: {str(e)}")
+
+
+@app.websocket("/api/markets/{market_id}/trades/stream")
+async def stream_market_trades(websocket: WebSocket, market_id: str):
+    """
+    WebSocket endpoint to stream real-time trades for a specific market.
+    """
+    await websocket.accept()
+    print(f"Client connected to trades stream for market {market_id}")
+    
+    try:
+        # First, send recent trades
+        recent_trades = await polymarket_client.get_market_trades(market_id, limit=20)
+        if recent_trades:
+            await websocket.send_json({
+                "type": "recent_trades",
+                "data": recent_trades
+            })
+        
+        # Then stream new trades in real-time
+        async for trade in polymarket_client.stream_trades(market_id):
+            try:
+                await websocket.send_json({
+                    "type": "new_trade",
+                    "data": trade
+                })
+            except Exception as e:
+                print(f"Error sending trade to client: {e}")
+                break
+                
+    except WebSocketDisconnect:
+        print(f"Client disconnected from trades stream for market {market_id}")
+    except Exception as e:
+        print(f"Error in trades stream for market {market_id}: {e}")
+        try:
+            await websocket.send_json({
+                "type": "error",
+                "message": str(e)
+            })
+        except:
+            pass
+    finally:
+        try:
+            await websocket.close()
+        except:
+            pass
 
 
 if __name__ == "__main__":

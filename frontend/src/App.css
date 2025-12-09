@@ -12,13 +12,15 @@
   width: 100%;
   background: #000000;
   border-bottom: 1px solid #FFFF00;
-  padding: 16px 20px;
+  padding: 12px 20px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   position: sticky;
   top: 0;
   z-index: 1000;
+  gap: 20px;
+  flex-wrap: wrap;
 }
 
 .logo-container {
@@ -66,6 +68,134 @@
   color: #000000;
 }
 
+.header-ribbon {
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  display: flex;
+  align-items: center;
+}
+
+.header-ribbon::-webkit-scrollbar {
+  height: 4px;
+}
+
+.header-ribbon::-webkit-scrollbar-track {
+  background: #1a1a1a;
+}
+
+.header-ribbon::-webkit-scrollbar-thumb {
+  background: #FFFF00;
+}
+
+.trending-markets-ribbon {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  white-space: nowrap;
+}
+
+.ribbon-market-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border: 1px solid #FFFF00;
+  background: #000000;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.ribbon-market-item:hover {
+  background: #1a1a1a;
+}
+
+.ribbon-market-item.active {
+  background: #FFFF00;
+}
+
+.ribbon-market-link {
+  color: #FFFFFF;
+  font-size: 11px;
+  text-decoration: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 200px;
+}
+
+.ribbon-market-item.active .ribbon-market-link {
+  color: #000000;
+}
+
+.ribbon-market-image {
+  width: 20px;
+  height: 20px;
+  object-fit: cover;
+  flex-shrink: 0;
+  border: 1px solid #FFFF00;
+}
+
+.ribbon-market-text {
+  flex: 1;
+  line-height: 1.2;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ribbon-trades-button {
+  background: transparent;
+  border: 1px solid #FFFF00;
+  color: #FFFF00;
+  padding: 4px 6px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 24px;
+}
+
+.ribbon-trades-button:hover {
+  background: #FFFF00;
+  color: #000000;
+}
+
+.ribbon-market-item.active .ribbon-trades-button {
+  background: #000000;
+  color: #FFFF00;
+  border-color: #000000;
+}
+
+.ribbon-market-item.active .ribbon-trades-button:hover {
+  background: #1a1a1a;
+}
+
+.ribbon-loading {
+  color: #888;
+  font-size: 12px;
+  padding: 4px 8px;
+  white-space: nowrap;
+}
+
+.trades-ribbon-container {
+  width: 100%;
+  background: #000000;
+  border-bottom: 1px solid #FFFF00;
+  padding: 0;
+  position: sticky;
+  top: 60px;
+  z-index: 999;
+}
+
 .app-layout {
   display: flex;
   flex-direction: row;
@@ -75,7 +205,7 @@
   gap: 20px;
   padding: 20px;
   margin-top: 20px;
-  justify-content: right;
+  justify-content: center;
 }
 
 .chat-container {
@@ -231,99 +361,6 @@
   }
 }
 
-.trending-sidebar {
-  width: 280px;
-  background: #000000;
-  border: 1px solid #FFFF00;
-  padding: 16px;
-  height: calc(100vh - 180px);
-  overflow-y: auto;
-  overflow-x: hidden;
-  flex-shrink: 0;
-}
-
-.trending-title {
-  color: #FFFF00;
-  font-size: 17px;
-  font-weight: 600;
-  margin-bottom: 12px;
-  text-transform: uppercase;
-}
-
-.trending-markets {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.trending-market-link {
-  color: #FFFFFF;
-  font-size: 12px;
-  text-decoration: none;
-  padding: 8px 10px;
-  border: 1px solid #FFFF00;
-  transition: all 0.2s ease;
-  line-height: 1.4;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-  overflow: hidden;
-}
-
-.trending-market-image {
-  width: 32px;
-  height: 32px;
-  object-fit: cover;
-  flex-shrink: 0;
-  border: 1px solid #FFFF00;
-}
-
-.trending-market-text {
-  flex: 1;
-  line-height: 1.4;
-  min-width: 0;
-  word-wrap: break-word;
-  overflow-wrap: break-word;
-}
-
-.trending-market-link:hover {
-  background: #1a1a1a;
-  color: #FFFF00;
-}
-
-.trending-loading {
-  color: #888;
-  font-size: 15px;
-  text-align: center;
-  padding: 20px;
-}
-
-.trending-sidebar::-webkit-scrollbar {
-  width: 6px;
-}
-
-.trending-sidebar::-webkit-scrollbar-track {
-  background: #1a1a1a;
-}
-
-.trending-sidebar::-webkit-scrollbar-thumb {
-  background: #FFFF00;
-}
-
-@media (max-width: 1200px) {
-  .trending-sidebar {
-    display: none;
-  }
-  
-  .app-layout {
-    max-width: 100%;
-  }
-  
-  .app {
-    max-width: 100%;
-  }
-}
 
 @media (max-width: 768px) {
   .app {

@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import ChatMessage from './components/ChatMessage'
 import ChatInput from './components/ChatInput'
 import LandingPage from './components/LandingPage'
+import RealtimeTrades from './components/RealtimeTrades'
 import './App.css'
 import axios from 'axios'
 import type { Message, ChatResponse, Market } from './types'
@@ -31,6 +32,7 @@ function App() {
   ])
   const [isLoading, setIsLoading] = useState<boolean>(false)
   const [trendingMarkets, setTrendingMarkets] = useState<Market[]>([])
+  const [selectedMarketForTrades, setSelectedMarketForTrades] = useState<{id: string, title?: string} | null>(null)
   // Load language preference from localStorage (per-user, client-side only)
   const [language, setLanguage] = useState<'en' | 'zh'>(() => {
     try {
@@ -346,6 +348,67 @@ function App() {
           <img src="/bnbpoly.png" alt="Logo" className="logo" />
           <span className="logo-text">BNBPOLY</span>
         </div>
+        <div className="header-ribbon">
+          <div className="trending-markets-ribbon">
+            {trendingMarkets.length > 0 ? (
+              trendingMarkets.map((market, index) => {
+                const marketData = market as any
+                const imageUrl = marketData.image || marketData.icon || null
+                const originalTitle = market.question || marketData.title || marketData.name || `Market ${index + 1}`
+                const marketTitle = language === 'zh' && translatedTitles[market.id] 
+                  ? translatedTitles[market.id] 
+                  : originalTitle
+                const marketUrl = getPolymarketUrl(market)
+                const isSelected = selectedMarketForTrades?.id === market.id
+                
+                return (
+                  <div key={market.id || index} className={`ribbon-market-item ${isSelected ? 'active' : ''}`}>
+                    <a
+                      href={marketUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="ribbon-market-link"
+                    >
+                      {imageUrl && (
+                        <img 
+                          src={imageUrl} 
+                          alt="" 
+                          className="ribbon-market-image"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).style.display = 'none'
+                          }}
+                        />
+                      )}
+                      <span className="ribbon-market-text" title={marketTitle}>
+                        {marketTitle.length > 30 ? marketTitle.substring(0, 30) + '...' : marketTitle}
+                      </span>
+                    </a>
+                    <button
+                      className={`ribbon-trades-button ${isSelected ? 'active' : ''}`}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        if (isSelected) {
+                          setSelectedMarketForTrades(null);
+                        } else {
+                          setSelectedMarketForTrades({
+                            id: market.id,
+                            title: marketTitle
+                          });
+                        }
+                      }}
+                      title={isSelected ? "Hide real-time trades" : "View real-time trades"}
+                    >
+                      📊
+                    </button>
+                  </div>
+                )
+              })
+            ) : (
+              <div className="ribbon-loading">{t('loadingMarkets')}</div>
+            )}
+          </div>
+        </div>
         <div className="language-selector">
           <button 
             className={`lang-btn ${language === 'en' ? 'active' : ''}`}
@@ -361,6 +424,16 @@ function App() {
           </button>
         </div>
       </div>
+      {selectedMarketForTrades && (
+        <div className="trades-ribbon-container">
+          <RealtimeTrades
+            marketId={selectedMarketForTrades.id}
+            marketTitle={selectedMarketForTrades.title}
+            onClose={() => setSelectedMarketForTrades(null)}
+            apiBaseUrl={API_BASE_URL}
+          />
+        </div>
+      )}
       <div className="app-layout">
         <div className="app">
           <div className="chat-container">
@@ -382,61 +455,7 @@ function App() {
               <div ref={messagesEndRef} />
             </div>
 
-                  <ChatInput onSendMessage={handleSendMessage} disabled={isLoading} language={language} />
-          </div>
-        </div>
-        
-        <div className="trending-sidebar">
-          <h3 className="trending-title">{t('trendingMarkets')}</h3>
-          <div className="trending-markets">
-            {trendingMarkets.length > 0 ? (
-              trendingMarkets.map((market, index) => {
-                const marketData = market as any
-                const imageUrl = marketData.image || marketData.icon || null
-                const originalTitle = market.question || marketData.title || marketData.name || `Market ${index + 1}`
-                const marketTitle = language === 'zh' && translatedTitles[market.id] 
-                  ? translatedTitles[market.id] 
-                  : originalTitle
-                const marketUrl = getPolymarketUrl(market)
-                
-                // Debug: log first market to see structure
-                if (index === 0 && import.meta.env.DEV) {
-                  console.log('Sample market data:', {
-                    id: market.id,
-                    slug: marketData.slug,
-                    conditionId: marketData.conditionId,
-                    questionID: marketData.questionID,
-                    constructedUrl: marketUrl,
-                    allKeys: Object.keys(marketData)
-                  })
-                }
-                
-                return (
-                  <a
-                    key={market.id || index}
-                    href={marketUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="trending-market-link"
-                  >
-                    {imageUrl && (
-                      <img 
-                        src={imageUrl} 
-                        alt="" 
-                        className="trending-market-image"
-                        onError={(e) => {
-                          // Hide image if it fails to load
-                          (e.target as HTMLImageElement).style.display = 'none'
-                        }}
-                      />
-                    )}
-                    <span className="trending-market-text">{marketTitle}</span>
-                  </a>
-                )
-              })
-            ) : (
-              <div className="trending-loading">{t('loadingMarkets')}</div>
-            )}
+            <ChatInput onSendMessage={handleSendMessage} disabled={isLoading} language={language} />
           </div>
         </div>
       </div>

@@ -2,8 +2,12 @@
 Polymarket API client for fetching market data and bet information.
 """
 import httpx
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Callable, AsyncIterator
 import os
+import json
+import asyncio
+import websockets
+from datetime import datetime
 
 
 class PolymarketClient:
@@ -490,6 +494,151 @@ class PolymarketClient:
         except Exception as e:
             print(f"Error fetching markets for event {event_slug}: {e}")
             return []
+    
+    async def stream_trades(
+        self, 
+        market_id: str, 
+        callback: Optional[Callable[[Dict], None]] = None
+    ) -> AsyncIterator[Dict]:
+        """
+        Stream real-time trades for a specific market using Polymarket RTDS.
+        
+        Args:
+            market_id: The market ID to stream trades for
+            callback: Optional callback function to handle each trade
+            
+        Yields:
+            Dict containing trade data
+        """
+        ws_url = "wss://ws-live-data.polymarket.com"
+        reconnect_delay = 5
+        max_reconnect_delay = 60
+        
+        while True:
+            try:
+                async with websockets.connect(ws_url) as websocket:
+                    print(f"Connected to Polymarket RTDS for market {market_id}")
+                    
+                    # Subscribe to trades for this market
+                    # Polymarket RTDS uses topic-based subscriptions
+                    # Try different subscription formats based on RTDS documentation
+                    subscribe_formats = [
+                        {
+                            "topic": f"trades:{market_id}",
+                            "type": "subscribe"
+                        },
+                        {
+                            "topic": "trades",
+                            "type": "subscribe",
+                            "market": market_id
+                        },
+                        {
+                            "type": "subscribe",
+                            "channel": "trades",
+                            "market": market_id
+                        }
+                    ]
+                    
+                    # Try to subscribe (send first format, others as fallback if needed)
+                    subscribed = False
+                    for i, sub_msg in enumerate(subscribe_formats):
+                        try:
+                            await websocket.send(json.dumps(sub_msg))
+                            print(f"Sent subscription message {i+1} for market {market_id}: {sub_msg}")
+                            subscribed = True
+                            break
+                        except Exception as e:
+                            print(f"Error sending subscription format {i+1}: {e}")
+                            if i < len(subscribe_formats) - 1:
+                                await asyncio.sleep(0.5)  # Brief delay before trying next format
+                    
+                    if not subscribed:
+                        print(f"Warning: Could not send subscription for market {market_id}")
+                    
+                    # Listen for messages
+                    async for message in websocket:
+                        try:
+                            data = json.loads(message)
+                            
+                            # Handle RTDS message structure: {topic, type, timestamp, payload}
+                            msg_type = data.get("type") or data.get("event") or ""
+                            topic = data.get("topic", "")
+                            payload = data.get("payload") or data.get("data") or data
+                            
+                            # Check if this is a trade-related message
+                            if (msg_type == "trade" or 
+                                "trade" in str(topic).lower() or 
+                                "trade" in str(data).lower() or
+                                topic.startswith("trades:")):
+                                trade_data = payload if payload != data else data
+                                
+                                # Format trade data consistently
+                                formatted_trade = {
+                                    "id": trade_data.get("id") or trade_data.get("tradeId") or trade_data.get("trade_id"),
+                                    "market_id": market_id,
+                                    "timestamp": trade_data.get("timestamp") or trade_data.get("time") or trade_data.get("created_at") or datetime.now().isoformat(),
+                                    "price": trade_data.get("price") or trade_data.get("priceNum"),
+                                    "size": trade_data.get("size") or trade_data.get("amount") or trade_data.get("amountNum"),
+                                    "side": trade_data.get("side") or trade_data.get("type") or trade_data.get("direction"),  # "buy" or "sell"
+                                    "outcome": trade_data.get("outcome") or trade_data.get("outcomeIndex"),
+                                    "user": trade_data.get("user") or trade_data.get("trader") or trade_data.get("userAddress"),
+                                }
+                                
+                                # Call callback if provided
+                                if callback:
+                                    try:
+                                        callback(formatted_trade)
+                                    except Exception as e:
+                                        print(f"Error in callback: {e}")
+                                
+                                # Yield the trade
+                                yield formatted_trade
+                                
+                            elif msg_type == "error" or "error" in str(data).lower():
+                                error_msg = data.get("message") or data.get("error") or "Unknown error"
+                                print(f"RTDS error: {error_msg}")
+                                
+                            elif msg_type in ["subscribed", "subscription_succeeded"]:
+                                print(f"Successfully subscribed to trades for market {market_id}")
+                                
+                            # Log other message types for debugging (uncomment for debugging)
+                            # else:
+                            #     print(f"Received message type: {msg_type}, data: {data}")
+                                
+                        except json.JSONDecodeError as e:
+                            print(f"Error parsing WebSocket message: {e}, raw: {message[:200]}")
+                            continue
+                        except Exception as e:
+                            print(f"Error processing trade message: {e}")
+                            import traceback
+                            traceback.print_exc()
+                            continue
+                            
+            except websockets.exceptions.ConnectionClosed:
+                print(f"WebSocket connection closed for market {market_id}, reconnecting in {reconnect_delay}s...")
+                await asyncio.sleep(reconnect_delay)
+                reconnect_delay = min(reconnect_delay * 2, max_reconnect_delay)
+                
+            except Exception as e:
+                print(f"Error in WebSocket stream for market {market_id}: {e}")
+                print(f"Reconnecting in {reconnect_delay}s...")
+                await asyncio.sleep(reconnect_delay)
+                reconnect_delay = min(reconnect_delay * 2, max_reconnect_delay)
+    
+    async def get_recent_trades_stream(
+        self, 
+        market_id: str, 
+        limit: int = 10
+    ) -> List[Dict]:
+        """
+        Get recent trades and then continue streaming new ones.
+        This combines the initial fetch with real-time updates.
+        """
+        # First, get recent trades via HTTP
+        recent_trades = await self.get_market_trades(market_id, limit=limit)
+        
+        # Return recent trades first, then stream will continue with new ones
+        return recent_trades
     
     async def close(self):
         """Close the HTTP client."""
