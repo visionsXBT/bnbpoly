@@ -205,9 +205,20 @@ function App() {
 
   // Detect language from message content
   const detectMessageLanguage = (text: string): 'en' | 'zh' => {
-    // Check if message contains Chinese characters
+    // Check if message contains Chinese characters (CJK Unified Ideographs)
+    // This includes Chinese, Japanese Kanji, and Korean Hanja
     const hasChinese = /[\u4e00-\u9fff]/.test(text)
-    return hasChinese ? 'zh' : 'en'
+    
+    // Also check for common Chinese punctuation and numbers
+    const hasChinesePunctuation = /[，。！？；：、]/.test(text)
+    
+    // If message has Chinese characters or punctuation, it's Chinese
+    if (hasChinese || hasChinesePunctuation) {
+      return 'zh'
+    }
+    
+    // Default to English
+    return 'en'
   }
 
   const handleSendMessage = async (message: string): Promise<void> => {
