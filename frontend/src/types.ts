@@ -23,6 +23,7 @@ export interface Trade {
   side?: 'buy' | 'sell';
   outcome?: string;
   user?: string;
+  question?: string; // Market question/title
 }
 
 export interface TradeStreamMessage {

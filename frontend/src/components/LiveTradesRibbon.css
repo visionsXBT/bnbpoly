@@ -1,0 +1,154 @@
+.live-trades-ribbon {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  background: #000000;
+  border-bottom: 1px solid #FFFF00;
+  overflow: hidden;
+  flex: 1;
+  min-width: 0;
+}
+
+.ribbon-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  padding: 4px 8px;
+  background: #1a1a1a;
+  border: 1px solid #FFFF00;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  animation: pulse 2s infinite;
+}
+
+.status-dot.connected {
+  background: #4caf50;
+}
+
+.status-dot.disconnected {
+  background: #ff9800;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.status-text {
+  font-size: 11px;
+  font-weight: 600;
+  color: #FFFF00;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.ribbon-trades-scroll {
+  flex: 1;
+  overflow-x: auto;
+  overflow-y: hidden;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  white-space: nowrap;
+  scroll-behavior: smooth;
+}
+
+.ribbon-trades-scroll::-webkit-scrollbar {
+  height: 2px;
+}
+
+.ribbon-trades-scroll::-webkit-scrollbar-track {
+  background: #1a1a1a;
+}
+
+.ribbon-trades-scroll::-webkit-scrollbar-thumb {
+  background: #FFFF00;
+}
+
+.ribbon-no-trades {
+  color: #888;
+  font-size: 12px;
+  padding: 4px 0;
+}
+
+.ribbon-trade-item {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 12px;
+  background: #1a1a1a;
+  border: 1px solid #FFFF00;
+  font-size: 12px;
+  color: #FFFFFF;
+  white-space: nowrap;
+  flex-shrink: 0;
+  animation: slideIn 0.3s ease-out;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.trade-user {
+  color: #FFFF00;
+  font-weight: 600;
+}
+
+.trade-arrow {
+  color: #FFFFFF;
+  margin: 0 4px;
+}
+
+.trade-side {
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.5px;
+  padding: 2px 6px;
+  border-radius: 2px;
+}
+
+.trade-buy {
+  color: #4caf50;
+  background: rgba(76, 175, 80, 0.1);
+}
+
+.trade-sell {
+  color: #f44336;
+  background: rgba(244, 67, 54, 0.1);
+}
+
+.trade-unknown {
+  color: #888;
+}
+
+.trade-market {
+  color: #FFFFFF;
+  margin-left: 6px;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.trade-amount {
+  color: #FFFF00;
+  font-weight: 600;
+  margin-left: 6px;
+}
+
