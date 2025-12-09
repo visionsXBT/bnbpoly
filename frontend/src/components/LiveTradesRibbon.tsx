@@ -33,7 +33,7 @@ const LiveTradesRibbon: React.FC<LiveTradesRibbonProps> = ({ apiBaseUrl = '' }) 
         wsRef.current = ws;
 
         ws.onopen = () => {
-          console.log('Live trades WebSocket connected');
+          console.log('Price updates WebSocket connected');
           setIsConnected(true);
         };
 
@@ -45,14 +45,15 @@ const LiveTradesRibbon: React.FC<LiveTradesRibbonProps> = ({ apiBaseUrl = '' }) 
               console.log('Price updates connected:', message.message);
             } else if (message.type === 'price_update' && message.data) {
               const priceUpdate = message.data as PriceUpdate;
+              console.log('Received price update:', priceUpdate);
               setPriceUpdates(prev => {
-                // Avoid duplicates (same market, same price direction within 1 second)
+                // Avoid duplicates (same market, same price direction within 2 seconds)
                 const now = Date.now();
                 const exists = prev.some(p => 
                   p.market_id === priceUpdate.market_id && 
                   p.price_direction === priceUpdate.price_direction &&
                   p.timestamp && 
-                  (now - new Date(p.timestamp).getTime()) < 1000
+                  (now - new Date(p.timestamp).getTime()) < 2000
                 );
                 if (exists) return prev;
                 const updated = [priceUpdate, ...prev].slice(0, 50); // Keep last 50 updates
@@ -60,6 +61,8 @@ const LiveTradesRibbon: React.FC<LiveTradesRibbonProps> = ({ apiBaseUrl = '' }) 
               });
             } else if (message.type === 'error') {
               console.error('Price updates error:', message.message);
+            } else {
+              console.log('Received unknown message type:', message.type, message);
             }
           } catch (e) {
             console.error('Error parsing WebSocket message:', e);
@@ -141,14 +144,14 @@ const LiveTradesRibbon: React.FC<LiveTradesRibbonProps> = ({ apiBaseUrl = '' }) 
               <span className="price-arrow"> &gt; </span>
               <span className="price-label">PRICE</span>
               <span className="price-value">{formatPrice(update.current_price || update.lastTradePrice)}</span>
-              {update.price_direction && (
+              {update.price_direction && update.price_direction !== 'neutral' && (
                 <>
                   <span className={`price-direction price-${update.price_direction}`}>
                     {update.price_direction === 'up' ? '↑' : '↓'}
                   </span>
-                  {update.price_change !== undefined && (
+                  {update.price_change !== undefined && update.previous_price && update.previous_price > 0 && (
                     <span className={`price-change price-${update.price_direction}`}>
-                      {formatPriceChange(update.price_change / (update.previous_price || 1))}
+                      {formatPriceChange(update.price_change / update.previous_price)}
                     </span>
                   )}
                 </>

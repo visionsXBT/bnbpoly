@@ -575,24 +575,33 @@ class PolymarketClient:
             Dict containing price update data with change direction
         """
         previous_prices: Dict[str, float] = {}
+        first_poll = True
         
         while True:
             try:
+                print(f"Polling {len(market_ids)} markets for price updates...")
                 # Fetch current prices from all markets
                 price_updates = await self.get_market_prices(market_ids)
+                print(f"Fetched {len(price_updates)} price updates")
                 
                 # Compare with previous prices and yield changes
                 for update in price_updates:
                     market_id = update.get("market_id")
                     current_price = update.get("lastTradePrice")
                     
-                    if not market_id or current_price is None:
+                    if not market_id:
                         continue
                     
                     # Convert to float if it's a string
                     try:
+                        if current_price is None:
+                            # Try bestBid or bestAsk as fallback
+                            current_price = update.get("bestBid") or update.get("bestAsk")
+                            if current_price is None:
+                                continue
                         current_price_float = float(current_price) if isinstance(current_price, str) else current_price
-                    except (ValueError, TypeError):
+                    except (ValueError, TypeError) as e:
+                        print(f"Error converting price for market {market_id}: {e}, price={current_price}")
                         continue
                     
                     # Check if price changed
@@ -600,14 +609,16 @@ class PolymarketClient:
                     
                     if previous_price is not None and previous_price > 0:
                         price_change = current_price_float - previous_price
-                        price_change_percent = abs(price_change / previous_price)
+                        price_change_percent = abs(price_change / previous_price) if previous_price > 0 else 0
                         
-                        # Only yield if price changed significantly (more than 0.1%)
-                        if price_change_percent > 0.001:
+                        # Only yield if price changed significantly (more than 0.05% to catch more updates)
+                        if price_change_percent > 0.0005:
                             update["price_change"] = price_change
                             update["price_direction"] = "up" if price_change > 0 else "down"
                             update["previous_price"] = previous_price
                             update["current_price"] = current_price_float
+                            
+                            print(f"Price change detected for {update.get('question', market_id)}: ${previous_price:.4f} -> ${current_price_float:.4f} ({update['price_direction']})")
                             
                             # Call callback if provided
                             if callback:
@@ -618,12 +629,20 @@ class PolymarketClient:
                             
                             yield update
                     elif previous_price is None:
-                        # First time seeing this market - store price but don't yield
-                        pass
+                        # First time seeing this market - store price and yield initial state
+                        if first_poll:
+                            # On first poll, yield all markets to show current prices
+                            update["price_change"] = 0
+                            update["price_direction"] = "neutral"
+                            update["previous_price"] = current_price_float
+                            update["current_price"] = current_price_float
+                            yield update
                     
                     # Update stored price
                     previous_prices[market_id] = current_price_float
                 
+                first_poll = False
+                print(f"Waiting {poll_interval} seconds before next poll...")
                 # Wait before next poll
                 await asyncio.sleep(poll_interval)
                 
