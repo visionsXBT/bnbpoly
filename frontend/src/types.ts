@@ -39,6 +39,7 @@ export interface PriceUpdate {
   oneHourPriceChange?: number;
   oneDayPriceChange?: number;
   volume24hr?: number;
+  image?: string;
   timestamp?: string;
 }
 

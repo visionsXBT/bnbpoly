@@ -194,6 +194,7 @@ class PolymarketClient:
                     "oneHourPriceChange": market_data.get("oneHourPriceChange"),
                     "oneDayPriceChange": market_data.get("oneDayPriceChange"),
                     "volume24hr": market_data.get("volume24hr"),
+                    "image": market_data.get("image") or market_data.get("icon"),
                     "timestamp": datetime.now().isoformat(),
                 }
                 price_updates.append(price_update)

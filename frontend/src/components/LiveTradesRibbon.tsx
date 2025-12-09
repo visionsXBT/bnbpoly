@@ -143,6 +143,16 @@ const LiveTradesRibbon: React.FC<LiveTradesRibbonProps> = ({ apiBaseUrl = '' }) 
               {/* Duplicate items for seamless loop */}
               {[...priceUpdates, ...priceUpdates].map((update, index) => (
                 <div key={`${update.market_id}-${update.timestamp}-${index}`} className={`ribbon-price-item price-${update.price_direction || 'neutral'}`}>
+                  {update.image && (
+                    <img 
+                      src={update.image} 
+                      alt="" 
+                      className="price-market-image"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).style.display = 'none';
+                      }}
+                    />
+                  )}
                   <span className="price-market">{formatMarket(update.question, update.market_id)}</span>
                   <span className="price-arrow"> &gt; </span>
                   <span className="price-label">PRICE</span>
