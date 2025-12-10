@@ -101,6 +101,16 @@ class InsightGenerator:
             if question:
                 context_parts.append(f"Question: {question}")
             
+            # Extract and format end date for time calculations
+            end_date = (market_details.get('endDate') or 
+                       market_details.get('end_date') or 
+                       market_details.get('endDateIso') or
+                       market_details.get('umaEndDate') or
+                       market_details.get('umaEndDateIso'))
+            if end_date:
+                context_parts.append(f"Market End Date: {end_date}")
+                context_parts.append("IMPORTANT: Use this end date with the current date provided to calculate time remaining until market resolution.")
+            
             # Extract outcomes/choices from market_details
             # Try multiple field names that Polymarket might use
             outcomes_data = (market_details.get('outcomes') or 
