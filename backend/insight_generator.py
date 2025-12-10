@@ -226,7 +226,10 @@ CRITICAL RULES - READ CAREFULLY:
 - **NEVER mention that markets weren't found or that search failed**: Even if no market data is provided, do NOT say "no markets found" or "search didn't return results". Just provide intelligent analysis based on general knowledge.
 - **If market data is provided, analyze it directly** - use the actual data for metrics, probabilities, and recommendations.
 - **If NO market data is provided, provide intelligent predictions anyway**: Use your knowledge of current events, trends, historical patterns, and general market dynamics to provide thoughtful analysis. Don't mention the absence of market data - just provide the best analysis you can.
-- Always use the current date and time provided in the user message to calculate accurate time differences. Do not estimate or guess the current date.
+- **CRITICAL: DATE AND TIME CALCULATIONS**: The current date and time is provided in the user message. You MUST use this exact date to calculate all time differences, time windows, and time remaining. 
+- **DO NOT estimate, guess, or use a different date**. If the current date is 2025-01-15 and an event is in June 2025, calculate: June 2025 - January 2025 = 5 months (not 6 months).
+- **ALWAYS calculate time differences accurately**: If current date is 2025-01-15 and something ends "before 2026", calculate: 2026-01-01 - 2025-01-15 = approximately 11.5 months (not 12 months).
+- **Include the actual current date in your response** when showing time windows or time remaining.
 - Pay close attention to conversation history. If the user asks a follow-up question (e.g., "who do you think will win?", "based on the candidates"), they are likely referring to a market discussed in the previous conversation. Use the conversation context to understand what market or event they're asking about.
 - If a market was discussed previously, maintain that context even if the user doesn't explicitly mention it again.
 - MAKE INTELLIGENT PREDICTIONS: When asked "who do you think will win?" or similar questions, you MUST provide specific predictions based on:
@@ -246,7 +249,8 @@ Use this exact structure with markdown formatting. Use Chinese headers if respon
 **Key Metrics:** (or **关键指标:** in Chinese)
 - List 3-5 key data points (volume, liquidity, probabilities, etc.) with specific numbers
 - Use bullet points with bold labels: **Label:** value (or **标签:** 值 in Chinese)
-- When showing time until resolution, calculate from the current date provided
+- **When showing time until resolution or time windows, you MUST calculate from the current date provided above. Show the calculation explicitly.**
+- Example: If current date is 2025-01-15 and event is June 2025, write: "Time Window: ~5 months (June 2025 - January 2025, from current date 2025-01-15)"
 - ALWAYS include specific candidate/choice probabilities if available in the market data (e.g., "Candidate A: 45%, Candidate B: 30%, Candidate C: 25%")
 
 **Market Assessment:** (or **市场评估:** in Chinese)
@@ -283,12 +287,25 @@ Formatting Rules:
                 content = msg.get('content', '')
                 conversation_context += f"{role.capitalize()}: {content}\n"
         
-        # Get current date and time
-        current_datetime = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        # Get current date and time (UTC)
+        current_datetime = datetime.utcnow()
+        current_date_str = current_datetime.strftime("%Y-%m-%d")
+        current_time_str = current_datetime.strftime("%H:%M:%S UTC")
+        current_datetime_str = f"{current_date_str} {current_time_str}"
+        current_year = current_datetime.year
+        current_month = current_datetime.month
+        current_day = current_datetime.day
         
         # Build user message - only include market data context if it exists
         if context:
-            user_message = f"""Current date and time: {current_datetime}
+            user_message = f"""=== CURRENT DATE AND TIME (USE THIS FOR ALL CALCULATIONS) ===
+Current Date: {current_date_str} ({current_year}-{current_month:02d}-{current_day:02d})
+Current Time: {current_time_str}
+Current Year: {current_year}
+Current Month: {current_month} ({current_datetime.strftime('%B')})
+Current Day: {current_day}
+
+IMPORTANT: Use the EXACT current date above to calculate all time differences. Do not estimate or use a different date.
 
 {conversation_context}
 
@@ -297,16 +314,23 @@ User query: {user_query}
 Market data context:
 {context}
 
-Please provide insights based on the above information."""
+Please provide insights based on the above information. When calculating time windows or time remaining, use the current date provided above."""
         else:
             # No market data - provide intelligent analysis without mentioning it
-            user_message = f"""Current date and time: {current_datetime}
+            user_message = f"""=== CURRENT DATE AND TIME (USE THIS FOR ALL CALCULATIONS) ===
+Current Date: {current_date_str} ({current_year}-{current_month:02d}-{current_day:02d})
+Current Time: {current_time_str}
+Current Year: {current_year}
+Current Month: {current_month} ({current_datetime.strftime('%B')})
+Current Day: {current_day}
+
+IMPORTANT: Use the EXACT current date above to calculate all time differences. Do not estimate or use a different date.
 
 {conversation_context}
 
 User query: {user_query}
 
-Please provide intelligent analysis and predictions based on current events, trends, historical patterns, and market dynamics. Use your knowledge to make educated predictions."""
+Please provide intelligent analysis and predictions based on current events, trends, historical patterns, and market dynamics. Use your knowledge to make educated predictions. When calculating time windows or time remaining, use the current date provided above."""
         
         try:
             message = await asyncio.to_thread(
