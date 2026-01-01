@@ -22,30 +22,16 @@ function App() {
   const [messages, setMessages] = useState<Message[]>([
     {
       role: 'assistant',
-      content: 'Welcome to WHISPER. Your AI-powered Polymarket insights assistant. Ask me about markets, betting opportunities, or get analysis on specific predictions. How can I help you today?'
+      content: 'Welcome to POLYSCOUT. Your AI-powered Polymarket insights assistant. Ask me about markets, betting opportunities, or get analysis on specific predictions. How can I help you today?'
     }
   ])
   const [isLoading, setIsLoading] = useState<boolean>(false)
   const [trendingMarkets, setTrendingMarkets] = useState<Market[]>([])
   const [selectedMarketForTrades, setSelectedMarketForTrades] = useState<{id: string, title?: string} | null>(null)
-  // Check if user has already entered (persist across refreshes)
-  const [showLanding, setShowLanding] = useState<boolean>(() => {
-    // Check localStorage to see if user has already entered
-    try {
-      const hasEntered = localStorage.getItem('hasEnteredLanding')
-      return !hasEntered
-    } catch (e) {
-      // If localStorage is not available, show landing page
-      return true
-    }
-  })
+  // Always show landing page on first visit
+  const [showLanding, setShowLanding] = useState<boolean>(true)
   
   const handleEnterLanding = () => {
-    try {
-      localStorage.setItem('hasEnteredLanding', 'true')
-    } catch (e) {
-      // Ignore localStorage errors
-    }
     setShowLanding(false)
   }
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -220,7 +206,7 @@ function App() {
       <div className="header">
         <div className="logo-container">
           <img src="/whisper.png" alt="Logo" className="logo" />
-          <span className="logo-text">WHISPER</span>
+          <span className="logo-text">POLYSCOUT</span>
         </div>
         <LiveTradesRibbon apiBaseUrl={API_BASE_URL} />
       </div>
