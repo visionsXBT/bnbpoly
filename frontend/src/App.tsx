@@ -22,7 +22,7 @@ function App() {
   const [messages, setMessages] = useState<Message[]>([
     {
       role: 'assistant',
-      content: 'Hello! I\'m your Polymarket insights assistant. Ask me about markets, betting opportunities, or get analysis on specific predictions. How can I help you today?'
+      content: 'Welcome to WHISPER. Your AI-powered Polymarket insights assistant. Ask me about markets, betting opportunities, or get analysis on specific predictions. How can I help you today?'
     }
   ])
   const [isLoading, setIsLoading] = useState<boolean>(false)
