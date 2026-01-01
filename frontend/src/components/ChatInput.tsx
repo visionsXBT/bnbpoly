@@ -4,15 +4,10 @@ import './ChatInput.css'
 interface ChatInputProps {
   onSendMessage: (message: string) => void
   disabled: boolean
-  language?: 'en' | 'zh'
 }
 
-function ChatInput({ onSendMessage, disabled, language = 'en' }: ChatInputProps) {
+function ChatInput({ onSendMessage, disabled }: ChatInputProps) {
   const [input, setInput] = useState<string>('')
-  
-  const placeholder = language === 'zh' 
-    ? '询问 Polymarket 投注、市场或获取见解...' 
-    : 'Ask about Polymarket bets, markets, or get insights...'
 
   const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
@@ -37,7 +32,7 @@ function ChatInput({ onSendMessage, disabled, language = 'en' }: ChatInputProps)
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyPress={handleKeyPress}
-          placeholder={placeholder}
+          placeholder="Ask about Polymarket bets, markets, or get insights..."
           disabled={disabled}
           className="chat-input"
         />

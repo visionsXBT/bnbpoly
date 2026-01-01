@@ -4,7 +4,7 @@
   gap: 12px;
   padding: 8px 16px;
   background: #000000;
-  border-bottom: 1px solid #FFFF00;
+  border-bottom: 1px solid #00FF00;
   overflow: hidden;
   flex: 1;
   min-width: 0;
@@ -17,7 +17,7 @@
   flex-shrink: 0;
   padding: 4px 8px;
   background: #1a1a1a;
-  border: 1px solid #FFFF00;
+  border: 1px solid #00FF00;
 }
 
 .status-dot {
@@ -47,7 +47,7 @@
 .status-text {
   font-size: 11px;
   font-weight: 600;
-  color: #FFFF00;
+  color: #00FF00;
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
@@ -88,7 +88,7 @@
   height: 20px;
   object-fit: cover;
   border-radius: 2px;
-  border: 1px solid #FFFF00;
+  border: 1px solid #00FF00;
   margin-right: 8px;
   flex-shrink: 0;
 }
@@ -104,7 +104,7 @@
   align-items: center;
   padding: 4px 12px;
   background: #1a1a1a;
-  border: 1px solid #FFFF00;
+  border: 1px solid #00FF00;
   font-size: 12px;
   color: #FFFFFF;
   white-space: nowrap;
@@ -136,7 +136,7 @@
 }
 
 .price-market {
-  color: #FFFF00;
+  color: #00FF00;
   font-weight: 600;
   max-width: 200px;
   overflow: hidden;

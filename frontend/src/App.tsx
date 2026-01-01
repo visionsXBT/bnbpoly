@@ -19,39 +19,15 @@ if (import.meta.env.DEV) {
 }
 
 function App() {
-  const getInitialMessage = (lang: 'en' | 'zh'): string => {
-    return lang === 'zh' 
-      ? '你好！我是您的 Polymarket 洞察助手。询问我关于市场、投注机会或获取特定预测的分析。今天我能为您做些什么？'
-      : 'Hello! I\'m your Polymarket insights assistant. Ask me about markets, betting opportunities, or get analysis on specific predictions. How can I help you today?'
-  }
-  
   const [messages, setMessages] = useState<Message[]>([
     {
       role: 'assistant',
-      content: getInitialMessage('en')
+      content: 'Hello! I\'m your Polymarket insights assistant. Ask me about markets, betting opportunities, or get analysis on specific predictions. How can I help you today?'
     }
   ])
   const [isLoading, setIsLoading] = useState<boolean>(false)
   const [trendingMarkets, setTrendingMarkets] = useState<Market[]>([])
   const [selectedMarketForTrades, setSelectedMarketForTrades] = useState<{id: string, title?: string} | null>(null)
-  // Load language preference from localStorage (per-user, client-side only)
-  const [language, setLanguage] = useState<'en' | 'zh'>(() => {
-    try {
-      const saved = localStorage.getItem('language')
-      return (saved === 'zh' || saved === 'en') ? saved : 'en'
-    } catch {
-      return 'en'
-    }
-  })
-  
-  // Persist language preference when it changes
-  useEffect(() => {
-    try {
-      localStorage.setItem('language', language)
-    } catch {
-      // Ignore localStorage errors
-    }
-  }, [language])
   // Check if user has already entered (persist across refreshes)
   const [showLanding, setShowLanding] = useState<boolean>(() => {
     // Check localStorage to see if user has already entered
@@ -73,95 +49,6 @@ function App() {
     setShowLanding(false)
   }
   const messagesEndRef = useRef<HTMLDivElement>(null)
-  
-  // Translation function
-  const t = (key: string): string => {
-    const translations: Record<string, { en: string; zh: string }> = {
-      'trendingMarkets': { en: 'Trending Markets', zh: '热门市场' },
-      'loadingMarkets': { en: 'Loading markets...', zh: '加载市场中...' },
-      'placeholder': { en: 'Ask about Polymarket bets, markets, or get insights...', zh: '询问 Polymarket 投注、市场或获取见解...' },
-      'error': { en: 'Sorry, I encountered an error processing your request. Please try again.', zh: '抱歉，处理您的请求时出错。请重试。' }
-    }
-    return translations[key]?.[language] || key
-  }
-
-  // Translate market title with multiple fallback options
-  const translateMarketTitle = async (title: string): Promise<string> => {
-    if (language === 'en' || !title) return title
-    
-    // Check localStorage cache first
-    const cacheKey = `translation_${title}`
-    const cached = localStorage.getItem(cacheKey)
-    if (cached) {
-      try {
-        const cachedData = JSON.parse(cached)
-        // Cache valid for 24 hours
-        if (Date.now() - cachedData.timestamp < 24 * 60 * 60 * 1000) {
-          return cachedData.translatedText
-        }
-      } catch (e) {
-        // Invalid cache, continue to API
-      }
-    }
-    
-    try {
-      // Try LibreTranslate (free, open-source alternative)
-      const response = await fetch('https://libretranslate.de/translate', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          q: title,
-          source: 'en',
-          target: 'zh',
-          format: 'text'
-        })
-      })
-      
-      if (response.ok) {
-        const data = await response.json()
-        if (data.translatedText) {
-          // Cache the translation
-          localStorage.setItem(cacheKey, JSON.stringify({
-            translatedText: data.translatedText,
-            timestamp: Date.now()
-          }))
-          return data.translatedText
-        }
-      }
-    } catch (error) {
-      console.error('LibreTranslate error:', error)
-    }
-    
-    // Fallback: return original title if translation fails
-    return title
-  }
-  
-  // State to store translated market titles
-  const [translatedTitles, setTranslatedTitles] = useState<Record<string, string>>({})
-  
-  // Translate market titles when language changes
-  useEffect(() => {
-    if (language === 'zh' && trendingMarkets.length > 0) {
-      const translateAll = async () => {
-        const translations: Record<string, string> = {}
-        for (const market of trendingMarkets) {
-          const marketData = market as any
-          const title = market.question || marketData.title || marketData.name || ''
-          if (title && !translations[market.id]) {
-            const translated = await translateMarketTitle(title)
-            translations[market.id] = translated
-          }
-        }
-        setTranslatedTitles(translations)
-      }
-      translateAll()
-    } else if (language === 'en') {
-      setTranslatedTitles({})
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [language, trendingMarkets])
 
   // Fetch trending markets on component mount
   useEffect(() => {
@@ -192,35 +79,6 @@ function App() {
     scrollToBottom()
   }, [messages])
 
-  // Update initial message when language changes (only if it's still the initial message)
-  useEffect(() => {
-    if (messages.length === 1 && messages[0].role === 'assistant') {
-      setMessages([{
-        role: 'assistant',
-        content: getInitialMessage(language)
-      }])
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [language])
-
-  // Detect language from message content
-  const detectMessageLanguage = (text: string): 'en' | 'zh' => {
-    // Check if message contains Chinese characters (CJK Unified Ideographs)
-    // This includes Chinese, Japanese Kanji, and Korean Hanja
-    const hasChinese = /[\u4e00-\u9fff]/.test(text)
-    
-    // Also check for common Chinese punctuation and numbers
-    const hasChinesePunctuation = /[，。！？；：、]/.test(text)
-    
-    // If message has Chinese characters or punctuation, it's Chinese
-    if (hasChinese || hasChinesePunctuation) {
-      return 'zh'
-    }
-    
-    // Default to English
-    return 'en'
-  }
-
   const handleSendMessage = async (message: string): Promise<void> => {
     if (!message.trim() || isLoading) return
 
@@ -237,22 +95,17 @@ function App() {
         content: msg.content
       }))
       
-      // Detect language from the user's message (not site setting)
-      // Response language should match the prompt language
-      const messageLanguage = detectMessageLanguage(message)
-      
       // Ensure no double slashes in URL
       const baseUrl = API_BASE_URL.endsWith('/') ? API_BASE_URL.slice(0, -1) : API_BASE_URL
       const apiUrl = `${baseUrl}/api/chat`
       console.log('API_BASE_URL:', API_BASE_URL)
       console.log('Sending request to:', apiUrl)
-      console.log('Detected message language:', messageLanguage, '(site setting:', language, ')')
       
       const response = await axios.post<ChatResponse>(apiUrl, {
         message: message,
         search_query: message.toLowerCase().includes('search') ? message : null,
         conversation_history: conversationHistory,
-        language: messageLanguage  // Use detected message language, not site setting
+        language: 'en'
       }, {
         timeout: 60000 // 60 second timeout
       })
@@ -265,27 +118,26 @@ function App() {
       setMessages(prev => [...prev, assistantMessage])
     } catch (error) {
       console.error('Error sending message:', error)
-      const errorPrefix = language === 'zh' ? '错误：' : 'Error: '
-      let errorContent = t('error')
+      let errorContent = 'Sorry, I encountered an error processing your request. Please try again.'
       
       // Show more detailed error
       if (axios.isAxiosError(error)) {
         if (error.code === 'ECONNABORTED') {
-          errorContent = `${errorPrefix}Request timeout. Please try again.`
+          errorContent = 'Error: Request timeout. Please try again.'
         } else if (error.response) {
           // Server responded with error
           const errorDetail = error.response.data?.detail || error.response.statusText || error.message
-          errorContent = `${errorPrefix}${errorDetail}`
+          errorContent = `Error: ${errorDetail}`
           console.error('Backend error details:', errorDetail, error.response.status)
         } else if (error.request) {
           // Request made but no response
-          errorContent = `${errorPrefix}No response from server. Check if backend is running and VITE_API_BASE_URL is set correctly.`
+          errorContent = 'Error: No response from server. Check if backend is running and VITE_API_BASE_URL is set correctly.'
           console.error('No response received:', error.request)
         } else {
-          errorContent = `${errorPrefix}${error.message}`
+          errorContent = `Error: ${error.message}`
         }
       } else if (error instanceof Error) {
-        errorContent = `${errorPrefix}${error.message}`
+        errorContent = `Error: ${error.message}`
       }
       
       const errorMessage: Message = {
@@ -358,9 +210,7 @@ function App() {
   if (showLanding) {
     return (
       <LandingPage 
-        onEnter={handleEnterLanding} 
-        language={language}
-        onLanguageChange={setLanguage}
+        onEnter={handleEnterLanding}
       />
     )
   }
@@ -373,20 +223,6 @@ function App() {
           <span className="logo-text">BNBPOLY</span>
         </div>
         <LiveTradesRibbon apiBaseUrl={API_BASE_URL} />
-        <div className="language-selector">
-          <button 
-            className={`lang-btn ${language === 'en' ? 'active' : ''}`}
-            onClick={() => setLanguage('en')}
-          >
-            EN
-          </button>
-          <button 
-            className={`lang-btn ${language === 'zh' ? 'active' : ''}`}
-            onClick={() => setLanguage('zh')}
-          >
-            中文
-          </button>
-        </div>
       </div>
       <div className="app-layout">
         <div className="app">
@@ -419,21 +255,18 @@ function App() {
               <div ref={messagesEndRef} />
             </div>
 
-            <ChatInput onSendMessage={handleSendMessage} disabled={isLoading} language={language} />
+            <ChatInput onSendMessage={handleSendMessage} disabled={isLoading} />
           </div>
         </div>
         
         <div className="trending-sidebar">
-          <h3 className="trending-title">{t('trendingMarkets')}</h3>
+          <h3 className="trending-title">Trending Markets</h3>
           <div className="trending-markets">
             {trendingMarkets.length > 0 ? (
               trendingMarkets.map((market, index) => {
                 const marketData = market as any
                 const imageUrl = marketData.image || marketData.icon || null
-                const originalTitle = market.question || marketData.title || marketData.name || `Market ${index + 1}`
-                const marketTitle = language === 'zh' && translatedTitles[market.id] 
-                  ? translatedTitles[market.id] 
-                  : originalTitle
+                const marketTitle = market.question || marketData.title || marketData.name || `Market ${index + 1}`
                 const marketUrl = getPolymarketUrl(market)
                 
                 return (
@@ -459,7 +292,7 @@ function App() {
                 )
               })
             ) : (
-              <div className="trending-loading">{t('loadingMarkets')}</div>
+              <div className="trending-loading">Loading markets...</div>
             )}
           </div>
         </div>

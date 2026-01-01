@@ -9,38 +9,6 @@
   position: relative;
 }
 
-.landing-language-selector {
-  position: absolute;
-  top: 20px;
-  right: 20px;
-  display: flex;
-  gap: 10px;
-}
-
-.landing-lang-btn {
-  background: #000000;
-  border: 1px solid #FFFF00;
-  color: #FFFF00;
-  padding: 8px 16px;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  font-family: 'UnifontExMono', sans-serif;
-  border-radius: 0;
-  text-transform: uppercase;
-}
-
-.landing-lang-btn:hover {
-  background: #FFFF00;
-  color: #000000;
-}
-
-.landing-lang-btn.active {
-  background: #FFFF00;
-  color: #000000;
-}
-
 .landing-content {
   text-align: center;
   max-width: 600px;
@@ -62,7 +30,7 @@
 }
 
 .landing-title {
-  color: #FFFF00;
+  color: #00FF00;
   font-size: 48px;
   font-weight: 600;
   margin: 0;
@@ -84,8 +52,8 @@
 
 .landing-button {
   background: #000000;
-  border: 2px solid #FFFF00;
-  color: #FFFF00;
+  border: 2px solid #00FF00;
+  color: #00FF00;
   padding: 16px 48px;
   font-size: 18px;
   font-weight: 600;
@@ -98,7 +66,7 @@
 }
 
 .landing-button:hover {
-  background: #FFFF00;
+  background: #00FF00;
   color: #000000;
   transform: scale(1.05);
 }
