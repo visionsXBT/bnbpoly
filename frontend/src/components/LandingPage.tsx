@@ -7,6 +7,8 @@ interface LandingPageProps {
 function LandingPage({ onEnter }: LandingPageProps) {
   return (
     <div className="landing-page">
+      <div className="landing-page-gradient-overlay"></div>
+      <div className="landing-page-opacity-overlay"></div>
       <div className="landing-content">
         <div className="landing-logo-container">
           <img src="/whisper.png" alt="POLYSCOUT Logo" className="landing-logo" />

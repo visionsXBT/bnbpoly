@@ -37,22 +37,57 @@ body::before {
   height: 100%;
   background: #000000;
   background-image: 
-    linear-gradient(to right, #121212 2px, transparent 2px),
-    linear-gradient(to bottom, #121212 2px, transparent 2px);
-  background-size: 6px 6px;
-  background-position: 0 0;
-  animation: pixelMoveBody 20s linear infinite;
+    linear-gradient(to right, #121212 0px, #121212 2px, #000000 2px, #000000 4px),
+    linear-gradient(to bottom, #121212 0px, #121212 2px, #000000 2px, #000000 4px);
+  background-size: 4px 4px;
+  -webkit-mask: linear-gradient(
+    to right,
+    rgba(0, 0, 0, 1.00) 0%,
+    rgba(0, 0, 0, 0.99) 10%,
+    rgba(0, 0, 0, 0.98) 20%,
+    rgba(0, 0, 0, 0.97) 30%,
+    rgba(0, 0, 0, 0.96) 40%,
+    rgba(0, 0, 0, 0.95) 50%,
+    rgba(0, 0, 0, 0.96) 60%,
+    rgba(0, 0, 0, 0.97) 70%,
+    rgba(0, 0, 0, 0.98) 80%,
+    rgba(0, 0, 0, 0.99) 90%,
+    rgba(0, 0, 0, 1.00) 100%
+  );
+  -webkit-mask-size: 200% 100%;
+  mask: linear-gradient(
+    to right,
+    rgba(0, 0, 0, 1.00) 0%,
+    rgba(0, 0, 0, 0.99) 10%,
+    rgba(0, 0, 0, 0.98) 20%,
+    rgba(0, 0, 0, 0.97) 30%,
+    rgba(0, 0, 0, 0.96) 40%,
+    rgba(0, 0, 0, 0.95) 50%,
+    rgba(0, 0, 0, 0.96) 60%,
+    rgba(0, 0, 0, 0.97) 70%,
+    rgba(0, 0, 0, 0.98) 80%,
+    rgba(0, 0, 0, 0.99) 90%,
+    rgba(0, 0, 0, 1.00) 100%
+  );
+  mask-size: 200% 100%;
+  animation: pixelMoveBody 8s linear infinite;
   z-index: 0;
   pointer-events: none;
-  will-change: background-position;
+  will-change: mask-position, -webkit-mask-position;
+}
+
+body::after {
+  display: none;
 }
 
 @keyframes pixelMoveBody {
   0% {
-    background-position: 0 0;
+    -webkit-mask-position: -100% 0;
+    mask-position: -100% 0;
   }
   100% {
-    background-position: 6px 6px;
+    -webkit-mask-position: 100% 0;
+    mask-position: 100% 0;
   }
 }
 
