@@ -134,6 +134,8 @@
   padding: 20px;
   margin-top: 20px;
   justify-content: right;
+  position: relative;
+  z-index: 1;
 }
 
 .chat-container {
