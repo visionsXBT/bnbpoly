@@ -9,7 +9,7 @@ function LandingPage({ onEnter }: LandingPageProps) {
     <div className="landing-page">
       <div className="landing-content">
         <div className="landing-logo-container">
-          <img src="/bnbpoly.png" alt="BNBPOLY Logo" className="landing-logo" />
+          <img src="/whisper.png" alt="WHISPER Logo" className="landing-logo" />
           <h1 className="landing-title">WHISPER</h1>
         </div>
         <h2 className="landing-subtitle">Polymarket Insights Assistant</h2>
