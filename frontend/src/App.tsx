@@ -220,7 +220,7 @@ function App() {
       <div className="header">
         <div className="logo-container">
           <img src="/bnbpoly.png" alt="Logo" className="logo" />
-          <span className="logo-text">BNBPOLY</span>
+          <span className="logo-text">WHISPER</span>
         </div>
         <LiveTradesRibbon apiBaseUrl={API_BASE_URL} />
       </div>

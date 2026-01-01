@@ -10,7 +10,7 @@ function LandingPage({ onEnter }: LandingPageProps) {
       <div className="landing-content">
         <div className="landing-logo-container">
           <img src="/bnbpoly.png" alt="BNBPOLY Logo" className="landing-logo" />
-          <h1 className="landing-title">BNBPOLY</h1>
+          <h1 className="landing-title">WHISPER</h1>
         </div>
         <h2 className="landing-subtitle">Polymarket Insights Assistant</h2>
         <p className="landing-description">AI-powered prediction market analysis and betting insights. Get real-time data, expert analysis, and actionable insights to make informed decisions.</p>
