@@ -70,18 +70,73 @@ class TradingBot:
         self.price_history: Dict[str, List[Tuple[datetime, float]]] = {}  # Track price history
         self.is_running: bool = True
         self._task: Optional[asyncio.Task] = None
+        self._position_update_task: Optional[asyncio.Task] = None
         
     def start(self, polymarket_client):
         """Start the trading bot in the background."""
         if self._task is None or self._task.done():
             self.is_running = True
             self._task = asyncio.create_task(self._trading_loop(polymarket_client))
+            # Start separate position update loop for real-time price updates
+            self._position_update_task = asyncio.create_task(self._position_update_loop(polymarket_client))
     
     def stop(self):
         """Stop the trading bot."""
         self.is_running = False
         if self._task and not self._task.done():
             self._task.cancel()
+        if hasattr(self, '_position_update_task') and self._position_update_task and not self._position_update_task.done():
+            self._position_update_task.cancel()
+    
+    def _is_realistic_market(self, market: dict) -> bool:
+        """Filter out joke/unrealistic markets."""
+        question = (market.get('question') or market.get('title') or market.get('name') or '').lower()
+        
+        # List of celebrity names and joke indicators
+        unrealistic_patterns = [
+            # Celebrity names that shouldn't be in serious political markets
+            'mrbeast', 'mr beast', 'lebon james', 'lebron', 'kanye', 'kanye west',
+            'elon musk', 'elon', 'trump', 'donald trump',  # Trump in unrealistic contexts
+            'taylor swift', 'kardashian', 'justin bieber', 'cristiano ronaldo',
+            'messi', 'tom brady', 'serena williams',
+            
+            # Joke indicators
+            'meme', 'joke', 'troll', 'satire', 'parody',
+            'will i', 'will you', 'will we',  # Personal questions
+            'will my', 'will your', 'will our',
+            
+            # Unrealistic political combinations
+            'celebrity.*president', 'celebrity.*nomination', 'youtuber.*president',
+            'athlete.*president', 'musician.*president',
+        ]
+        
+        # Check for unrealistic patterns
+        import re
+        for pattern in unrealistic_patterns:
+            if re.search(pattern, question, re.IGNORECASE):
+                # But allow if it's a "No" bet on something unrealistic (that's actually smart)
+                # We'll filter these out entirely to avoid confusion
+                print(f"Filtered out unrealistic market: {market.get('question', 'Unknown')[:80]}")
+                return False
+        
+        # Additional checks for political markets with celebrities
+        political_keywords = ['president', 'presidential', 'nomination', 'election', 'senate', 'congress', 'governor']
+        has_political = any(keyword in question for keyword in political_keywords)
+        
+        if has_political:
+            # Blocklist of celebrities that shouldn't be in political markets
+            celebrity_blocklist = [
+                'mrbeast', 'mr beast', 'lebron', 'kanye', 'elon musk', 
+                'taylor swift', 'kardashian', 'justin bieber', 'cristiano',
+                'messi', 'tom brady', 'serena', 'oprah', 'dwayne johnson',
+                'the rock', 'mark cuban', 'bill gates', 'warren buffett'
+            ]
+            for celebrity in celebrity_blocklist:
+                if celebrity in question:
+                    print(f"Filtered out celebrity political market: {market.get('question', 'Unknown')[:80]}")
+                    return False
+        
+        return True
     
     def _get_outcome_prices(self, market: dict) -> Tuple[float, float]:
         """Extract Yes and No prices from market data."""
@@ -318,6 +373,10 @@ class TradingBot:
                 analyzed_count = 0
                 for market in markets:
                     try:
+                        # Filter out unrealistic/joke markets
+                        if not self._is_realistic_market(market):
+                            continue
+                        
                         # Filter: only analyze markets with minimum volume/liquidity
                         volume = float(market.get('volumeNum', market.get('volume', 0)))
                         liquidity = float(market.get('liquidityNum', market.get('liquidity', 0)))
@@ -368,8 +427,28 @@ class TradingBot:
                 traceback.print_exc()
                 await asyncio.sleep(10)
     
-    async def _update_positions(self, markets: List[dict], polymarket_client):
+    async def _update_positions(self, markets: List[dict] = None, polymarket_client = None):
         """Update current prices and P&L for open positions."""
+        if not self.positions:
+            return
+        
+        # If markets not provided, fetch them
+        if markets is None and polymarket_client:
+            try:
+                # Get markets for all open positions
+                market_ids = [p.market_id for p in self.positions.values()]
+                markets = []
+                for market_id in market_ids:
+                    market_data = await polymarket_client.get_market_by_id(market_id)
+                    if market_data:
+                        markets.append(market_data)
+            except Exception as e:
+                print(f"Error fetching markets for position update: {e}")
+                return
+        
+        if not markets:
+            return
+        
         for position_key, position in list(self.positions.items()):
             market = next((m for m in markets if m.get('id') == position.market_id), None)
             if market:
@@ -389,6 +468,19 @@ class TradingBot:
                 
                 self.positions[position_key] = position
     
+    async def _position_update_loop(self, polymarket_client):
+        """Separate loop that updates position prices every 2 seconds for real-time updates."""
+        while self.is_running:
+            try:
+                if self.positions:
+                    await self._update_positions(polymarket_client=polymarket_client)
+                await asyncio.sleep(2)  # Update every 2 seconds
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                print(f"Error in position update loop: {e}")
+                await asyncio.sleep(5)
+    
     async def _execute_trades(self, markets: List[dict]):
         """Execute trades based on sophisticated strategies."""
         opportunities = []
@@ -401,6 +493,10 @@ class TradingBot:
         for market in tradeable_markets:
             market_id = market.get('id')
             if not market_id:
+                continue
+            
+            # Double-check: Don't trade on unrealistic markets
+            if not self._is_realistic_market(market):
                 continue
             
             analysis = self.market_analyses.get(market_id)
