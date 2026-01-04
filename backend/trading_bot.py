@@ -175,21 +175,23 @@ class TradingBot:
             # Volume strategy: Higher volume = more reliable
             volume_score = volume_factor * 30
             
-            # Momentum strategy: Strong momentum = good entry
-            momentum_score = abs(momentum) * 0.5 if abs(momentum) > 2 else 0
+            # Momentum strategy: Lower threshold for momentum
+            momentum_score = abs(momentum) * 0.5 if abs(momentum) > 0.5 else 0  # Lowered from 2
             
-            # Trend strategy: Consistent trends are better
-            trend_score = abs(trend) * 2 if abs(trend) > 0.1 else 0
+            # Trend strategy: Lower threshold for trends
+            trend_score = abs(trend) * 2 if abs(trend) > 0.05 else 0  # Lowered from 0.1
             
             # Liquidity strategy: Higher liquidity = better execution
             liquidity_score = min(20, liquidity / 1000) if liquidity > 0 else 0
             
-            # Mean reversion: If price is far from 0.5, expect reversion
+            # Mean reversion: Expanded price ranges for more opportunities
             mean_reversion_score = 0
-            if 0.2 < price_yes < 0.3 or 0.7 < price_yes < 0.8:
-                mean_reversion_score = 10  # Moderate reversion opportunity
+            if 0.25 < price_yes < 0.45 or 0.55 < price_yes < 0.75:
+                mean_reversion_score = 8  # Mild reversion opportunity
+            elif 0.2 < price_yes < 0.3 or 0.7 < price_yes < 0.8:
+                mean_reversion_score = 12  # Moderate reversion opportunity
             elif price_yes < 0.2 or price_yes > 0.8:
-                mean_reversion_score = 20  # Strong reversion opportunity
+                mean_reversion_score = 18  # Strong reversion opportunity
             
             score = volume_score + momentum_score + trend_score + liquidity_score + mean_reversion_score
             
@@ -238,7 +240,7 @@ class TradingBot:
                     market_id = market.get('id')
                     if market_id and market_id not in market_ids_seen:
                         liquidity = float(market.get('liquidityNum', market.get('liquidity', 0)))
-                        if liquidity > 5000:  # Only include markets with decent liquidity
+                        if liquidity > 2000:  # Lowered liquidity threshold
                             all_markets[market_id] = market
                             market_ids_seen.add(market_id)
                 print(f"Found {len([m for m in liquidity_markets if m.get('id') not in market_ids_seen])} additional liquidity markets")
@@ -262,7 +264,7 @@ class TradingBot:
                             volume = float(market.get('volumeNum', market.get('volume', 0)))
                             liquidity = float(market.get('liquidityNum', market.get('liquidity', 0)))
                             # Include if it has reasonable volume or liquidity
-                            if volume > 1000 or liquidity > 2000:
+                            if volume > 500 or liquidity > 800:  # Relaxed thresholds
                                 all_markets[market_id] = market
                                 market_ids_seen.add(market_id)
                     await asyncio.sleep(0.5)  # Rate limiting between searches
@@ -320,8 +322,8 @@ class TradingBot:
                         volume = float(market.get('volumeNum', market.get('volume', 0)))
                         liquidity = float(market.get('liquidityNum', market.get('liquidity', 0)))
                         
-                        # Include if volume > 500 or liquidity > 1000 (lower thresholds for more opportunities)
-                        if volume > 500 or liquidity > 1000:
+                        # Include if volume > 200 or liquidity > 500 (very relaxed thresholds)
+                        if volume > 200 or liquidity > 500:
                             analysis = self.analyze_market(market)
                             self.market_analyses[analysis.market_id] = analysis
                             analyzed_count += 1
@@ -419,8 +421,8 @@ class TradingBot:
                     'expected_profit_pct': analysis.arbitrage_opportunity
                 })
             
-            # Strategy 2: Strong momentum trades
-            elif abs(analysis.score) > 50 and analysis.volume > 10000:
+            # Strategy 2: Momentum trades (relaxed thresholds)
+            elif abs(analysis.score) > 25 and analysis.volume > 2000:  # Lowered from 50/10000
                 direction = 'Yes' if analysis.score > 0 else 'No'
                 opportunities.append({
                     'market': market,
@@ -431,35 +433,47 @@ class TradingBot:
                     'expected_profit_pct': min(10, abs(analysis.momentum) * 2)
                 })
             
-            # Strategy 3: Mean reversion (price far from 0.5)
-            elif 0.15 < analysis.price_yes < 0.25 or 0.75 < analysis.price_yes < 0.85:
-                direction = 'Yes' if analysis.price_yes < 0.3 else 'No'
+            # Strategy 3: Mean reversion (expanded price ranges)
+            elif (0.20 < analysis.price_yes < 0.40 or 0.60 < analysis.price_yes < 0.80):  # Expanded from 0.15-0.25 and 0.75-0.85
+                direction = 'Yes' if analysis.price_yes < 0.5 else 'No'
                 opportunities.append({
                     'market': market,
                     'analysis': analysis,
                     'strategy': 'mean_reversion',
-                    'priority': 40,
+                    'priority': 30,  # Lowered from 40
                     'outcome': direction,
                     'expected_profit_pct': 5
                 })
             
-            # Strategy 4: High volume breakouts
-            elif abs(analysis.score) > 35 and analysis.volume_24h > 50000 and abs(analysis.momentum) > 3:
+            # Strategy 4: Volume breakouts (relaxed)
+            elif abs(analysis.score) > 20 and analysis.volume_24h > 10000 and abs(analysis.momentum) > 1.5:  # Lowered thresholds
                 direction = 'Yes' if analysis.momentum > 0 else 'No'
                 opportunities.append({
                     'market': market,
                     'analysis': analysis,
                     'strategy': 'volume_breakout',
-                    'priority': 35,
+                    'priority': 25,  # Lowered from 35
                     'outcome': direction,
                     'expected_profit_pct': 7
+                })
+            
+            # Strategy 5: General opportunity catch-all (very relaxed)
+            elif abs(analysis.score) > 15 and (analysis.volume > 1000 or analysis.liquidity > 500):
+                direction = 'Yes' if analysis.score > 0 else 'No'
+                opportunities.append({
+                    'market': market,
+                    'analysis': analysis,
+                    'strategy': 'general',
+                    'priority': abs(analysis.score),
+                    'outcome': direction,
+                    'expected_profit_pct': 4
                 })
         
         # Sort by priority and execute top opportunities
         opportunities.sort(key=lambda x: x['priority'], reverse=True)
         
         # Execute trades (limit to prevent over-trading, but allow more opportunities)
-        max_trades_per_cycle = 8  # Increased from 5 to allow more trades from expanded market search
+        max_trades_per_cycle = 12  # Increased to allow more trades with relaxed thresholds
         trades_executed = 0
         
         for opp in opportunities[:max_trades_per_cycle]:
@@ -532,6 +546,9 @@ class TradingBot:
             elif strategy == 'volume_breakout':
                 # 4-7% for volume breakouts
                 position_size = self.balance * 0.05
+            elif strategy == 'general':
+                # 1.5-3% for general opportunities
+                position_size = self.balance * 0.025
             else:
                 position_size = self.balance * 0.03
             
