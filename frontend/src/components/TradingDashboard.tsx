@@ -65,6 +65,8 @@ function TradingDashboard() {
     winRate: 0
   })
   const [markets, setMarkets] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   // Fetch markets for analysis display
   useEffect(() => {
@@ -76,6 +78,7 @@ function TradingDashboard() {
         }
       } catch (error) {
         console.error('Error fetching markets:', error)
+        // Don't set error state for markets, just log it
       }
     }
     fetchMarkets()
@@ -85,29 +88,50 @@ function TradingDashboard() {
   useEffect(() => {
     const fetchTradingData = async () => {
       try {
+        setError(null)
+        
         // Fetch stats
         const statsResponse = await axios.get(`${API_BASE_URL}/api/trading/stats`)
-        setStats(statsResponse.data)
+        if (statsResponse.data) {
+          setStats({
+            balance: statsResponse.data.balance ?? 2000,
+            initialBalance: statsResponse.data.initialBalance ?? 2000,
+            totalProfit: statsResponse.data.totalProfit ?? 0,
+            totalTrades: statsResponse.data.totalTrades ?? 0,
+            winningTrades: statsResponse.data.winningTrades ?? 0,
+            losingTrades: statsResponse.data.losingTrades ?? 0,
+            activePositions: statsResponse.data.activePositions ?? 0,
+            winRate: statsResponse.data.winRate ?? 0
+          })
+        }
 
         // Fetch positions
         const positionsResponse = await axios.get(`${API_BASE_URL}/api/trading/positions`)
-        setPositions(positionsResponse.data.positions || [])
+        setPositions(Array.isArray(positionsResponse.data?.positions) ? positionsResponse.data.positions : [])
 
         // Fetch trades
         const tradesResponse = await axios.get(`${API_BASE_URL}/api/trading/trades?limit=100`)
-        setTrades(tradesResponse.data.trades || [])
+        setTrades(Array.isArray(tradesResponse.data?.trades) ? tradesResponse.data.trades : [])
 
         // Fetch analyses
         const analysesResponse = await axios.get(`${API_BASE_URL}/api/trading/analyses`)
         const analysesMap = new Map<string, MarketAnalysis>()
-        if (analysesResponse.data.analyses) {
+        if (Array.isArray(analysesResponse.data?.analyses)) {
           analysesResponse.data.analyses.forEach((a: MarketAnalysis) => {
-            analysesMap.set(a.marketId, a)
+            if (a && a.marketId) {
+              analysesMap.set(a.marketId, a)
+            }
           })
         }
         setAnalyses(analysesMap)
+        
+        setLoading(false)
       } catch (error) {
         console.error('Error fetching trading data:', error)
+        setError(axios.isAxiosError(error) 
+          ? `Error connecting to backend: ${error.message}` 
+          : 'Error fetching trading data')
+        setLoading(false)
       }
     }
 
@@ -129,7 +153,48 @@ function TradingDashboard() {
   }
 
   const formatPercent = (value: number) => {
+    if (typeof value !== 'number' || isNaN(value)) return '0%'
     return `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`
+  }
+
+  if (loading) {
+    return (
+      <div className="trading-dashboard">
+        <div className="dashboard-header">
+          <div className="dashboard-header-left">
+            <button onClick={() => navigate('/')} className="back-button">
+              ← Back to Chat
+            </button>
+            <h1>POLYSCOUT Trading Dashboard</h1>
+          </div>
+        </div>
+        <div className="loading-state">
+          <div className="loading-spinner"></div>
+          <p>Loading trading data...</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="trading-dashboard">
+        <div className="dashboard-header">
+          <div className="dashboard-header-left">
+            <button onClick={() => navigate('/')} className="back-button">
+              ← Back to Chat
+            </button>
+            <h1>POLYSCOUT Trading Dashboard</h1>
+          </div>
+        </div>
+        <div className="error-state">
+          <p>⚠️ {error}</p>
+          <p style={{ fontSize: '14px', color: '#888', marginTop: '10px' }}>
+            Make sure the backend is running and the trading bot has started.
+          </p>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -154,7 +219,9 @@ function TradingDashboard() {
         </div>
         <div className="stat-card">
           <div className="stat-label">Win Rate</div>
-          <div className="stat-value">{stats.winRate.toFixed(1)}%</div>
+          <div className="stat-value">
+            {typeof stats.winRate === 'number' ? `${stats.winRate.toFixed(1)}%` : '0%'}
+          </div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Total P&L</div>
