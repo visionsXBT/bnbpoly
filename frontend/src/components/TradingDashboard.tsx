@@ -269,6 +269,12 @@ function TradingDashboard() {
                       <span className="detail-label">Entry Time:</span>
                       <span className="detail-value">{new Date(position.entryTime).toLocaleTimeString()}</span>
                     </div>
+                    {(position as any).strategy && (
+                      <div className="position-detail">
+                        <span className="detail-label">Strategy:</span>
+                        <span className="detail-value" style={{textTransform: 'capitalize'}}>{(position as any).strategy.replace('_', ' ')}</span>
+                      </div>
+                    )}
                   </div>
                 </div>
               ))
@@ -308,6 +314,12 @@ function TradingDashboard() {
                         <span className={`detail-value ${trade.profit >= 0 ? 'profit' : 'loss'}`}>
                           {formatCurrency(trade.profit)}
                         </span>
+                      </div>
+                    )}
+                    {(trade as any).strategy && (
+                      <div className="trade-detail">
+                        <span className="detail-label">Strategy:</span>
+                        <span className="detail-value" style={{textTransform: 'capitalize'}}>{(trade as any).strategy.replace('_', ' ')}</span>
                       </div>
                     )}
                   </div>
