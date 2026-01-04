@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 from polymarket_client import PolymarketClient
 from insight_generator import InsightGenerator
 from url_parser import parse_polymarket_url, extract_urls_from_text
+from trading_bot import get_trading_bot
 
 # Load environment variables
 load_dotenv()
@@ -18,6 +19,7 @@ load_dotenv()
 # Initialize clients (before lifespan)
 polymarket_client = PolymarketClient()
 insight_generator = InsightGenerator()
+trading_bot = get_trading_bot()
 
 # Use lifespan context for cleanup (replaces deprecated on_event)
 from contextlib import asynccontextmanager
@@ -25,8 +27,10 @@ from contextlib import asynccontextmanager
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
+    trading_bot.start(polymarket_client)
     yield
     # Shutdown
+    trading_bot.stop()
     await polymarket_client.close()
 
 app = FastAPI(title="Polymarket Insights Chatbot API", lifespan=lifespan)
@@ -340,6 +344,30 @@ async def stream_price_updates(websocket: WebSocket):
             await websocket.close()
         except:
             pass
+
+
+@app.get("/api/trading/stats")
+async def get_trading_stats():
+    """Get trading bot statistics."""
+    return trading_bot.get_stats()
+
+
+@app.get("/api/trading/positions")
+async def get_trading_positions():
+    """Get all open trading positions."""
+    return {"positions": trading_bot.get_positions()}
+
+
+@app.get("/api/trading/trades")
+async def get_trading_trades(limit: int = 100):
+    """Get recent trades."""
+    return {"trades": trading_bot.get_recent_trades(limit=limit)}
+
+
+@app.get("/api/trading/analyses")
+async def get_market_analyses():
+    """Get market analyses."""
+    return {"analyses": trading_bot.get_market_analyses()}
 
 
 if __name__ == "__main__":
