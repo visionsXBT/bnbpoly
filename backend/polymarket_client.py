@@ -27,8 +27,9 @@ class PolymarketClient:
             # Use API's end_date_min parameter to only get markets with end dates in the future
             # This is much more reliable than filtering in Python
             current_date = datetime.now()
-            # Only get markets that end at least 1 day from now (to include markets ending soon)
-            min_end_date = (current_date + timedelta(days=1)).isoformat() + 'Z'
+            # Get markets resolving in 1-2 weeks (7-14 days) - prioritize short-term
+            min_end_date = (current_date + timedelta(days=7)).isoformat() + 'Z'
+            max_end_date = (current_date + timedelta(days=14)).isoformat() + 'Z'
             
             # Also filter by year in question as backup, but use API date filter as primary
             params = {
@@ -36,14 +37,23 @@ class PolymarketClient:
                 "offset": offset,
                 "active": "true",
                 "closed": "false",
-                "end_date_min": min_end_date,  # Only markets ending in the future
-                "order": "volumeNum",  # Order by volume
+                "end_date_min": min_end_date,  # Markets ending in at least 7 days
+                "end_date_max": max_end_date,  # Markets ending within 14 days (1-2 weeks)
+                "order": "volumeNum",  # Order by volume (trending markets)
                 "ascending": "false"  # Descending order (highest volume first)
             }
             
-            response = await self.client.get(url, params=params)
-            response.raise_for_status()
-            markets = response.json()
+            try:
+                response = await self.client.get(url, params=params)
+                response.raise_for_status()
+                markets = response.json()
+            except Exception as e:
+                # If end_date_max is not supported, try without it
+                print(f"Error with date range params, trying without end_date_max: {e}")
+                params.pop('end_date_max', None)
+                response = await self.client.get(url, params=params)
+                response.raise_for_status()
+                markets = response.json()
             
             if not markets or len(markets) == 0:
                 # Fallback: try without end_date_min but still filter by year in question
@@ -210,7 +220,9 @@ class PolymarketClient:
             
             url = f"{self.api_url}/markets"
             current_date = datetime.now()
-            min_end_date = (current_date + timedelta(days=1)).isoformat() + 'Z'
+            # For search, use broader range but still prioritize short-term
+            min_end_date = (current_date + timedelta(days=7)).isoformat() + 'Z'
+            max_end_date = (current_date + timedelta(days=14)).isoformat() + 'Z'
             
             # Use Polymarket's built-in search - trust their algorithm
             # The 'q' parameter searches across question, slug, and other fields
@@ -220,7 +232,8 @@ class PolymarketClient:
                 "q": query,  # Full user query - Polymarket handles the matching
                 "active": "true",
                 "closed": "false",
-                "end_date_min": min_end_date,  # Only future markets
+                "end_date_min": min_end_date,  # Markets ending in at least 7 days
+                "end_date_max": max_end_date,  # Markets ending within 14 days
                 # Don't use "order": "volumeNum" when searching - it overrides search relevance!
             }
             
@@ -228,9 +241,17 @@ class PolymarketClient:
                 print(f"Searching Polymarket API with query: '{query}'")
                 print(f"API URL: {url}")
                 print(f"Params: {params}")
-                response = await self.client.get(url, params=params)
-                response.raise_for_status()
-                markets = response.json()
+                try:
+                    response = await self.client.get(url, params=params)
+                    response.raise_for_status()
+                    markets = response.json()
+                except Exception as e:
+                    # If end_date_max is not supported, try without it
+                    print(f"Error with date range params in search, trying without end_date_max: {e}")
+                    params.pop('end_date_max', None)
+                    response = await self.client.get(url, params=params)
+                    response.raise_for_status()
+                    markets = response.json()
                 
                 if markets and len(markets) > 0:
                     print(f"Polymarket API search returned {len(markets)} markets for query: '{query}'")

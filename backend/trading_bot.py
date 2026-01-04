@@ -4,7 +4,7 @@ Uses realistic strategies: arbitrage, momentum, volume analysis, and risk manage
 """
 import asyncio
 from typing import Dict, List, Optional, Tuple
-from datetime import datetime
+from datetime import datetime, timedelta
 from dataclasses import dataclass, field
 import random
 import math
@@ -22,6 +22,7 @@ class TradingPosition:
     current_price: float = 0.0
     unrealized_pnl: float = 0.0
     strategy: str = ""  # Track which strategy opened this position
+    trade_type: str = "swing"  # "scalp" for small volume trades, "swing" for context trades
 
 
 @dataclass
@@ -38,6 +39,7 @@ class SimulatedTrade:
     reason: str
     profit: Optional[float] = None
     strategy: str = ""
+    trade_type: str = "swing"  # "scalp" or "swing"
 
 
 @dataclass
@@ -56,6 +58,8 @@ class MarketAnalysis:
     price_no: float = 0.5
     volume_24h: float = 0.0
     liquidity_depth: float = 0.0
+    volume_score: float = 0.0  # Volume-based trading signal strength
+    context_score: float = 0.0  # Context-based trading signal strength (trend, momentum, sentiment)
 
 
 class TradingBot:
@@ -71,6 +75,7 @@ class TradingBot:
         self.is_running: bool = True
         self._task: Optional[asyncio.Task] = None
         self._position_update_task: Optional[asyncio.Task] = None
+        self._scalping_task: Optional[asyncio.Task] = None
         
     def start(self, polymarket_client):
         """Start the trading bot in the background."""
@@ -79,6 +84,8 @@ class TradingBot:
             self._task = asyncio.create_task(self._trading_loop(polymarket_client))
             # Start separate position update loop for real-time price updates
             self._position_update_task = asyncio.create_task(self._position_update_loop(polymarket_client))
+            # Start separate scalping loop for high-frequency volume trades
+            self._scalping_task = asyncio.create_task(self._scalping_loop(polymarket_client))
     
     def stop(self):
         """Stop the trading bot."""
@@ -87,6 +94,62 @@ class TradingBot:
             self._task.cancel()
         if hasattr(self, '_position_update_task') and self._position_update_task and not self._position_update_task.done():
             self._position_update_task.cancel()
+        if hasattr(self, '_scalping_task') and self._scalping_task and not self._scalping_task.done():
+            self._scalping_task.cancel()
+    
+    def _is_market_in_resolution_window(self, market: dict) -> bool:
+        """Check if market resolves in 1-2 weeks (7-14 days)."""
+        try:
+            # Try different possible field names for end date
+            end_date_str = (
+                market.get('endDate') or 
+                market.get('end_date') or 
+                market.get('resolutionDate') or
+                market.get('resolution_date') or
+                market.get('endsAt') or
+                market.get('ends_at')
+            )
+            
+            if not end_date_str:
+                # If no end date, check if it's a short-term market based on question
+                question = (market.get('question') or market.get('title') or '').lower()
+                # Look for time indicators like "this week", "next week", dates, etc.
+                short_term_indicators = ['this week', 'next week', 'today', 'tomorrow', 
+                                        'in 7 days', 'in 14 days', 'january 2024', 'february 2024',
+                                        'march 2024', 'april 2024', 'may 2024', 'june 2024']
+                # If it mentions 2025+ or "2028", likely long-term - filter out
+                if any(indicator in question for indicator in short_term_indicators):
+                    return True
+                # If question mentions years far in future (2025+), filter out
+                import re
+                years = re.findall(r'\b(20\d{2})\b', question)
+                if years:
+                    max_year = max([int(y) for y in years])
+                    if max_year > 2024:
+                        return False
+                # Default: if no date info, allow it but prefer markets with explicit dates
+                return True
+            
+            # Parse the end date
+            if isinstance(end_date_str, str):
+                # Try ISO format
+                if 'T' in end_date_str or end_date_str.endswith('Z'):
+                    end_date = datetime.fromisoformat(end_date_str.replace('Z', '+00:00'))
+                else:
+                    end_date = datetime.strptime(end_date_str.split('T')[0], '%Y-%m-%d')
+            else:
+                return True  # If we can't parse, allow it
+            
+            now = datetime.now(end_date.tzinfo) if end_date.tzinfo else datetime.now()
+            days_until_resolution = (end_date - now).days
+            
+            # Only include markets resolving in 7-14 days (1-2 weeks)
+            return 7 <= days_until_resolution <= 14
+            
+        except Exception as e:
+            print(f"Error checking market resolution date: {e}")
+            # On error, default to allowing the market
+            return True
     
     def _is_realistic_market(self, market: dict) -> bool:
         """Filter out joke/unrealistic markets."""
@@ -250,9 +313,17 @@ class TradingBot:
             
             score = volume_score + momentum_score + trend_score + liquidity_score + mean_reversion_score
             
+            # Calculate separate volume and context scores
+            # Volume score: purely based on trading volume and liquidity (for scalping)
+            volume_score_value = (volume_factor * 50) + (liquidity_score * 1.5)
+            
+            # Context score: based on trend, momentum, sentiment (for swing trading)
+            context_score_value = (momentum_score * 2) + (trend_score * 3) + ((sentiment - 0.5) * 40) + mean_reversion_score
+            
             # Direction matters: positive score for bullish, negative for bearish
             if momentum < 0 or trend < 0:
                 score = -score
+                context_score_value = -context_score_value
         
         return MarketAnalysis(
             market_id=market_id,
@@ -267,38 +338,57 @@ class TradingBot:
             price_yes=price_yes,
             price_no=price_no,
             volume_24h=volume_24h,
-            liquidity_depth=liquidity
+            liquidity_depth=liquidity,
+            volume_score=volume_score_value,
+            context_score=context_score_value
         )
     
     async def _fetch_markets_expanded(self, polymarket_client) -> List[dict]:
-        """Fetch markets using multiple strategies to find all tradeable opportunities."""
+        """Fetch markets using multiple strategies, prioritizing trending and short-term markets."""
         all_markets = {}
         market_ids_seen = set()
         
         try:
-            # Strategy 1: Top markets by volume (primary source)
-            print("Fetching top markets by volume...")
-            volume_markets = await polymarket_client.get_markets(limit=200, offset=0)
+            # Strategy 1: Trending markets (high volume, recent activity) - PRIORITY
+            print("Fetching trending markets by volume (prioritized)...")
+            volume_markets = await polymarket_client.get_markets(limit=300, offset=0)
+            
+            # Separate markets by resolution window
+            short_term_markets = []
+            other_markets = []
+            
             for market in volume_markets:
                 market_id = market.get('id')
                 if market_id and market_id not in market_ids_seen:
-                    all_markets[market_id] = market
+                    if self._is_market_in_resolution_window(market):
+                        short_term_markets.append(market)
+                    else:
+                        other_markets.append(market)
                     market_ids_seen.add(market_id)
-            print(f"Found {len(volume_markets)} markets by volume")
             
-            # Strategy 2: High liquidity markets (different ordering)
-            print("Fetching high liquidity markets...")
+            # Prioritize short-term markets - add them first
+            for market in short_term_markets:
+                all_markets[market.get('id')] = market
+            
+            print(f"Found {len(short_term_markets)} short-term markets (1-2 weeks), {len(other_markets)} long-term markets")
+            
+            # Strategy 2: High liquidity markets - ONLY short-term
+            print("Fetching high liquidity short-term markets...")
             try:
                 # Fetch with higher offset to get different markets
                 liquidity_markets = await polymarket_client.get_markets(limit=150, offset=100)
+                short_term_count = 0
                 for market in liquidity_markets:
                     market_id = market.get('id')
                     if market_id and market_id not in market_ids_seen:
-                        liquidity = float(market.get('liquidityNum', market.get('liquidity', 0)))
-                        if liquidity > 2000:  # Lowered liquidity threshold
-                            all_markets[market_id] = market
-                            market_ids_seen.add(market_id)
-                print(f"Found {len([m for m in liquidity_markets if m.get('id') not in market_ids_seen])} additional liquidity markets")
+                        # Only include if it's in resolution window
+                        if self._is_market_in_resolution_window(market):
+                            liquidity = float(market.get('liquidityNum', market.get('liquidity', 0)))
+                            if liquidity > 2000:
+                                all_markets[market_id] = market
+                                market_ids_seen.add(market_id)
+                                short_term_count += 1
+                print(f"Found {short_term_count} additional short-term liquidity markets")
             except Exception as e:
                 print(f"Error fetching liquidity markets: {e}")
             
@@ -309,19 +399,25 @@ class TradingBot:
                 "politics", "economy", "stock", "market", "tech", "AI"
             ]
             
-            print(f"Searching for markets by trending keywords...")
+            print(f"Searching for short-term markets by trending keywords...")
             for keyword in trending_searches[:8]:  # Limit to avoid too many requests
                 try:
                     searched_markets = await polymarket_client.search_markets(keyword, limit=30)
+                    short_term_count = 0
                     for market in searched_markets:
                         market_id = market.get('id')
                         if market_id and market_id not in market_ids_seen:
-                            volume = float(market.get('volumeNum', market.get('volume', 0)))
-                            liquidity = float(market.get('liquidityNum', market.get('liquidity', 0)))
-                            # Include if it has reasonable volume or liquidity
-                            if volume > 500 or liquidity > 800:  # Relaxed thresholds
-                                all_markets[market_id] = market
-                                market_ids_seen.add(market_id)
+                            # Only include short-term markets
+                            if self._is_market_in_resolution_window(market):
+                                volume = float(market.get('volumeNum', market.get('volume', 0)))
+                                liquidity = float(market.get('liquidityNum', market.get('liquidity', 0)))
+                                # Include if it has reasonable volume or liquidity
+                                if volume > 500 or liquidity > 800:
+                                    all_markets[market_id] = market
+                                    market_ids_seen.add(market_id)
+                                    short_term_count += 1
+                    if short_term_count > 0:
+                        print(f"Found {short_term_count} short-term markets for '{keyword}'")
                     await asyncio.sleep(0.5)  # Rate limiting between searches
                 except Exception as e:
                     print(f"Error searching for '{keyword}': {e}")
@@ -330,14 +426,22 @@ class TradingBot:
             print(f"Total unique markets found: {len(all_markets)}")
             
             # Convert to list and sort by combined score (volume + liquidity)
+            # Prioritize trending markets (high volume/activity)
             markets_list = list(all_markets.values())
             markets_list.sort(
                 key=lambda x: (
-                    float(x.get('volumeNum', 0) or x.get('volume', 0) or 0) +
-                    float(x.get('liquidityNum', 0) or x.get('liquidity', 0) or 0) * 0.5
+                    # Prioritize by volume (trending indicator)
+                    float(x.get('volumeNum', 0) or x.get('volume', 0) or 0) * 1.5 +  # Volume weighted more
+                    float(x.get('liquidityNum', 0) or x.get('liquidity', 0) or 0) * 0.5 +
+                    # Bonus for markets resolving soon (within 10 days)
+                    (10 if self._is_market_in_resolution_window(x) else 0) * 1000
                 ),
                 reverse=True
             )
+            
+            # Log summary
+            short_term_count = sum(1 for m in markets_list if self._is_market_in_resolution_window(m))
+            print(f"Total markets after filtering: {len(markets_list)} ({short_term_count} short-term 1-2 weeks)")
             
             return markets_list
             
@@ -369,13 +473,19 @@ class TradingBot:
                 
                 print(f"Analyzing {len(markets)} markets for trading opportunities...")
                 
-                # Analyze all fetched markets (not just top 50)
+                # Analyze all fetched markets, prioritizing short-term trending markets
                 analyzed_count = 0
+                short_term_analyzed = 0
+                
                 for market in markets:
                     try:
                         # Filter out unrealistic/joke markets
                         if not self._is_realistic_market(market):
                             continue
+                        
+                        # CRITICAL: Only analyze markets that resolve in 1-2 weeks
+                        if not self._is_market_in_resolution_window(market):
+                            continue  # Skip long-term markets
                         
                         # Filter: only analyze markets with minimum volume/liquidity
                         volume = float(market.get('volumeNum', market.get('volume', 0)))
@@ -386,13 +496,16 @@ class TradingBot:
                             analysis = self.analyze_market(market)
                             self.market_analyses[analysis.market_id] = analysis
                             analyzed_count += 1
+                            short_term_analyzed += 1
                             
-                            # Limit analysis to prevent memory issues, but analyze more than before
+                            # Limit analysis to prevent memory issues, prioritize trending (already sorted)
                             if analyzed_count >= 150:  # Analyze up to 150 markets
                                 break
                     except Exception as e:
                         print(f"Error analyzing market {market.get('id')}: {e}")
                         continue
+                
+                print(f"Analyzed {short_term_analyzed} short-term markets (1-2 week resolution)")
                 
                 print(f"Analyzed {analyzed_count} markets")
                 
@@ -481,6 +594,105 @@ class TradingBot:
                 print(f"Error in position update loop: {e}")
                 await asyncio.sleep(5)
     
+    async def _scalping_loop(self, polymarket_client):
+        """Separate high-frequency loop for volume scalping trades (every 2-5 seconds)."""
+        import random
+        
+        while self.is_running:
+            try:
+                # Fetch high-volume markets for scalping (top 100 by volume)
+                markets = await polymarket_client.get_markets(limit=100, offset=0)
+                
+                if not markets:
+                    await asyncio.sleep(3)
+                    continue
+                
+                # Filter for high-volume, realistic, short-term markets
+                scalp_opportunities = []
+                
+                for market in markets[:50]:  # Check top 50 high-volume markets
+                    try:
+                        # Quick filters
+                        if not self._is_realistic_market(market):
+                            continue
+                        
+                        if not self._is_market_in_resolution_window(market):
+                            continue
+                        
+                        volume = float(market.get('volumeNum', market.get('volume', 0)))
+                        liquidity = float(market.get('liquidityNum', market.get('liquidity', 0)))
+                        
+                        # Scalping requires HIGH volume (minimum $10k) for liquidity
+                        if volume < 10000 or liquidity < 5000:
+                            continue
+                        
+                        # Quick analysis for scalping
+                        analysis = self.analyze_market(market)
+                        
+                        # Scalping criteria: High volume score and reasonable signal
+                        if analysis.volume_score > 25 and abs(analysis.score) > 20:
+                            market_title = market.get('question') or market.get('title') or market.get('name') or 'Unknown'
+                            
+                            # Check if we already have a position
+                            direction = 'Yes' if analysis.score > 0 else 'No'
+                            position_key = f"{analysis.market_id}-{direction}"
+                            
+                            if position_key not in self.positions:
+                                scalp_opportunities.append({
+                                    'market': market,
+                                    'analysis': analysis,
+                                    'outcome': direction,
+                                    'priority': analysis.volume_score
+                                })
+                    except Exception as e:
+                        continue
+                
+                # Sort by volume score (highest first)
+                scalp_opportunities.sort(key=lambda x: x['priority'], reverse=True)
+                
+                # Execute up to 3-5 scalping trades per cycle (small positions)
+                max_scalps = min(5, len(scalp_opportunities))
+                
+                for opp in scalp_opportunities[:max_scalps]:
+                    if self.balance < 0.5:  # Need minimum balance
+                        break
+                    
+                    market = opp['market']
+                    analysis = opp['analysis']
+                    outcome = opp['outcome']
+                    market_title = market.get('question') or market.get('title') or market.get('name') or 'Unknown'
+                    
+                    # Scalp position size: $0.50-$2.00 range (around $1)
+                    base_size = 1.0
+                    volume_multiplier = 0.5 + (min(analysis.volume_score, 50) / 50) * 1.5
+                    position_size = base_size * volume_multiplier
+                    position_size = max(0.5, min(position_size, 2.0))
+                    
+                    if position_size > self.balance:
+                        continue
+                    
+                    price_yes, price_no = self._get_outcome_prices(market)
+                    price = price_yes if outcome in ['Yes', 'YES', 'yes'] else price_no
+                    
+                    # Quick checks: reasonable price and spread
+                    if price < 0.05 or price > 0.95:  # Avoid extreme prices for scalping
+                        continue
+                    
+                    # Execute scalp trade
+                    reason = f"Volume Scalp: {outcome} (Vol: {analysis.volume:.0f}, VolScore: {analysis.volume_score:.1f})"
+                    await self._open_position(market, analysis, outcome, market_title, price,
+                                            position_size, 'volume_scalp', reason, 'scalp')
+                
+                # Wait 2-5 seconds before next scalping cycle (randomized to avoid patterns)
+                wait_time = 2 + random.random() * 3  # 2-5 seconds
+                await asyncio.sleep(wait_time)
+                
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                print(f"Error in scalping loop: {e}")
+                await asyncio.sleep(3)
+    
     async def _execute_trades(self, markets: List[dict]):
         """Execute trades based on sophisticated strategies."""
         opportunities = []
@@ -498,6 +710,10 @@ class TradingBot:
             # Double-check: Don't trade on unrealistic markets
             if not self._is_realistic_market(market):
                 continue
+            
+            # CRITICAL: Only trade markets resolving in 1-2 weeks
+            if not self._is_market_in_resolution_window(market):
+                continue  # Skip long-term markets
             
             analysis = self.market_analyses.get(market_id)
             if not analysis:
@@ -524,9 +740,10 @@ class TradingBot:
                     'market': market,
                     'analysis': analysis,
                     'strategy': 'momentum',
-                    'priority': abs(analysis.score),
-                    'outcome': direction,
-                    'expected_profit_pct': min(10, abs(analysis.momentum) * 2)
+            'priority': abs(analysis.score),
+            'outcome': direction,
+            'expected_profit_pct': min(10, abs(analysis.momentum) * 2),
+            'trade_type': 'swing'  # Momentum trades are swing trades
                 })
             
             # Strategy 3: Mean reversion (expanded price ranges)
@@ -536,9 +753,10 @@ class TradingBot:
                     'market': market,
                     'analysis': analysis,
                     'strategy': 'mean_reversion',
-                    'priority': 30,  # Lowered from 40
-                    'outcome': direction,
-                    'expected_profit_pct': 5
+            'priority': 30,  # Lowered from 40
+            'outcome': direction,
+            'expected_profit_pct': 5,
+            'trade_type': 'swing'  # Mean reversion are swing trades
                 })
             
             # Strategy 4: Volume breakouts (relaxed)
@@ -548,12 +766,29 @@ class TradingBot:
                     'market': market,
                     'analysis': analysis,
                     'strategy': 'volume_breakout',
-                    'priority': 25,  # Lowered from 35
-                    'outcome': direction,
-                    'expected_profit_pct': 7
+            'priority': 25,  # Lowered from 35
+            'outcome': direction,
+            'expected_profit_pct': 7,
+            'trade_type': 'swing'  # Volume breakouts can be swings
                 })
             
-            # Strategy 5: General opportunity catch-all (very relaxed)
+            # Strategy 5: Volume Scalping (high volume, small positions ~$1)
+            # This will be handled separately in the scalping loop for faster execution
+            
+            # Strategy 6: Context Swing Trading (strong context signals, larger positions)
+            elif abs(analysis.context_score) > 25:  # Strong context signal
+                direction = 'Yes' if analysis.context_score > 0 else 'No'
+                opportunities.append({
+                    'market': market,
+                    'analysis': analysis,
+                    'strategy': 'context_swing',
+                    'priority': abs(analysis.context_score),
+                    'outcome': direction,
+                    'expected_profit_pct': 8,  # Higher profit target for swings
+                    'trade_type': 'swing'
+                })
+            
+            # Strategy 7: General opportunity catch-all (very relaxed)
             elif abs(analysis.score) > 15 and (analysis.volume > 1000 or analysis.liquidity > 500):
                 direction = 'Yes' if analysis.score > 0 else 'No'
                 opportunities.append({
@@ -562,22 +797,27 @@ class TradingBot:
                     'strategy': 'general',
                     'priority': abs(analysis.score),
                     'outcome': direction,
-                    'expected_profit_pct': 4
+                    'expected_profit_pct': 4,
+                    'trade_type': 'swing'  # Default to swing
                 })
         
         # Sort by priority and execute top opportunities
         opportunities.sort(key=lambda x: x['priority'], reverse=True)
         
-        # Execute trades (limit to prevent over-trading, but allow more opportunities)
-        max_trades_per_cycle = 12  # Increased to allow more trades with relaxed thresholds
+        # Filter out scalping opportunities (handled separately in scalping loop)
+        swing_opportunities = [opp for opp in opportunities if opp.get('trade_type') == 'swing']
+        
+        # Execute swing trades (larger, context-based positions)
+        max_swings_per_cycle = 6  # Focus on swing trades in main loop
         trades_executed = 0
         
-        for opp in opportunities[:max_trades_per_cycle]:
-            if trades_executed >= max_trades_per_cycle:
+        for opp in swing_opportunities[:max_swings_per_cycle]:
+            if trades_executed >= max_swings_per_cycle:
                 break
-            
             await self._execute_opportunity(opp)
             trades_executed += 1
+        
+        # Note: Scalping trades are handled separately in _scalping_loop()
         
         # Check existing positions for exit conditions
         await self._check_exit_conditions(markets)
@@ -632,30 +872,48 @@ class TradingBot:
             if position_key in self.positions:
                 return
             
-            # Calculate position size based on strategy and confidence
-            if strategy == 'momentum':
-                # 3-8% of balance for momentum trades
-                position_size = self.balance * (0.03 + (abs(analysis.score) / 100) * 0.05)
-            elif strategy == 'mean_reversion':
-                # 2-5% for mean reversion
-                position_size = self.balance * 0.04
-            elif strategy == 'volume_breakout':
-                # 4-7% for volume breakouts
-                position_size = self.balance * 0.05
-            elif strategy == 'general':
-                # 1.5-3% for general opportunities
-                position_size = self.balance * 0.025
-            else:
-                position_size = self.balance * 0.03
+            # Determine trade type from opportunity
+            trade_type = opportunity.get('trade_type', 'swing')
             
-            # Cap position size
-            position_size = min(position_size, self.balance * 0.10, 100.0)  # Max 10% or $100
-            position_size = max(position_size, 10.0)  # Min $10
+            # Calculate position size based on strategy and trade type
+            # Note: Scalping positions are calculated in _scalping_loop()
+            if trade_type == 'scalp':
+                # This shouldn't be called from here, but handle it anyway
+                base_scalp_size = 1.0
+                volume_multiplier = 0.5 + (min(analysis.volume_score, 50) / 50) * 1.5
+                position_size = base_scalp_size * volume_multiplier
+                position_size = max(0.5, min(position_size, 2.0))
+            else:
+                # Swing trading: Larger positions based on context
+                if strategy == 'context_swing':
+                    # Context-based swing: 3-8% of balance
+                    position_size = self.balance * (0.03 + (abs(analysis.context_score) / 100) * 0.05)
+                elif strategy == 'momentum':
+                    # 3-8% of balance for momentum trades
+                    position_size = self.balance * (0.03 + (abs(analysis.score) / 100) * 0.05)
+                elif strategy == 'mean_reversion':
+                    # 2-5% for mean reversion
+                    position_size = self.balance * 0.04
+                elif strategy == 'volume_breakout':
+                    # 4-7% for volume breakouts
+                    position_size = self.balance * 0.05
+                elif strategy == 'general':
+                    # 1.5-3% for general opportunities
+                    position_size = self.balance * 0.025
+                else:
+                    position_size = self.balance * 0.03
+                
+                # Cap swing position size
+                position_size = min(position_size, self.balance * 0.15, 150.0)  # Max 15% or $150 for swings
+                position_size = max(position_size, 5.0)  # Min $5 for swings
             
             if position_size <= self.balance:
-                reason = f"{strategy.title()}: {outcome} signal (Vol: {analysis.volume:.0f}, Mom: {analysis.momentum:.2f}%)"
+                if trade_type == 'scalp':
+                    reason = f"Volume Scalp: {outcome} (Vol: {analysis.volume:.0f}, Size: ${position_size:.2f})"
+                else:
+                    reason = f"{strategy.title()}: {outcome} signal (Vol: {analysis.volume:.0f}, Context: {analysis.context_score:.1f})"
                 await self._open_position(market, analysis, outcome, market_title, price,
-                                        position_size, strategy, reason)
+                                        position_size, strategy, reason, trade_type)
     
     async def _check_exit_conditions(self, markets: List[dict]):
         """Check all open positions for exit conditions."""
@@ -676,11 +934,25 @@ class TradingBot:
             profit_pct = (current_price - position.entry_price) / position.entry_price
             profit_abs = (current_price - position.entry_price) * position.size
             
-            # Exit conditions based on strategy
+            # Exit conditions based on strategy and trade type
             should_exit = False
             exit_reason = ""
             
-            if position.strategy == 'arbitrage':
+            # Scalping trades: Quick in/out with small profit targets
+            if position.trade_type == 'scalp':
+                # Scalps: Take profit at 1-3%, stop loss at 0.5-1%
+                if profit_pct > 0.02:  # Take profit at 2%
+                    should_exit = True
+                    exit_reason = "Scalp profit target: +2%"
+                elif profit_pct < -0.008:  # Stop loss at 0.8%
+                    should_exit = True
+                    exit_reason = "Scalp stop loss: -0.8%"
+                # Also exit if held too long (>2 hours for scalps)
+                elif (datetime.now() - position.entry_time).total_seconds() > 7200:
+                    should_exit = True
+                    exit_reason = "Scalp timeout: 2 hours"
+            
+            elif position.strategy == 'arbitrage':
                 # Exit arbitrage when sum approaches 1.0 (market corrects)
                 if analysis.price_yes + analysis.price_no >= 0.99:
                     should_exit = True
@@ -689,6 +961,15 @@ class TradingBot:
                 elif profit_pct > 0.03:
                     should_exit = True
                     exit_reason = "Take profit: Arbitrage profit target met"
+            
+            elif position.strategy == 'context_swing':
+                # Context swing trades: Higher profit targets, wider stops
+                if profit_pct > 0.10:  # Take profit at 10%
+                    should_exit = True
+                    exit_reason = "Context swing profit: +10%"
+                elif profit_pct < -0.06:  # Stop loss at 6%
+                    should_exit = True
+                    exit_reason = "Context swing stop: -6%"
             
             elif position.strategy == 'momentum':
                 # Take profit at 8%, stop loss at 4%
@@ -735,7 +1016,7 @@ class TradingBot:
                 await self._close_position(position, current_price, market.get('question') or market.get('title') or 'Unknown', exit_reason)
     
     async def _open_position(self, market: dict, analysis: MarketAnalysis, outcome: str, 
-                            market_title: str, price: float, size: float, strategy: str, reason: str):
+                            market_title: str, price: float, size: float, strategy: str, reason: str, trade_type: str = 'swing'):
         """Open a new trading position."""
         if size > self.balance:
             return  # Not enough balance
@@ -751,7 +1032,8 @@ class TradingBot:
             entry_time=datetime.now(),
             current_price=price,
             unrealized_pnl=0.0,
-            strategy=strategy
+            strategy=strategy,
+            trade_type=trade_type
         )
         
         self.positions[position_key] = position
@@ -767,7 +1049,8 @@ class TradingBot:
             price=price,
             size=size,
             reason=reason,
-            strategy=strategy
+            strategy=strategy,
+            trade_type=trade_type
         )
         
         self.trades.insert(0, trade)
@@ -798,7 +1081,8 @@ class TradingBot:
             size=position.size,
             reason=reason,
             profit=profit,
-            strategy=position.strategy
+            strategy=position.strategy,
+            trade_type=position.trade_type
         )
         
         self.trades.insert(0, trade)
@@ -835,7 +1119,8 @@ class TradingBot:
                 'size': round(p.size, 2),
                 'unrealizedPnl': round(p.unrealized_pnl, 2),
                 'entryTime': p.entry_time.isoformat(),
-                'strategy': p.strategy
+                'strategy': p.strategy,
+                'tradeType': p.trade_type
             }
             for p in self.positions.values()
         ]
@@ -854,7 +1139,8 @@ class TradingBot:
                 'size': round(t.size, 2),
                 'reason': t.reason,
                 'profit': round(t.profit, 2) if t.profit is not None else None,
-                'strategy': t.strategy
+                'strategy': t.strategy,
+                'tradeType': getattr(t, 'trade_type', 'swing')
             }
             for t in self.trades[:limit]
         ]
