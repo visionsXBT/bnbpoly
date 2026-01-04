@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import axios from 'axios'
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import './TradingDashboard.css'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || ''
@@ -67,6 +68,7 @@ function TradingDashboard() {
   const [markets, setMarkets] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [pnlHistory, setPnlHistory] = useState<Array<{timestamp: string, pnl: number, balance: number}>>([])
 
   // Fetch markets for analysis display
   useEffect(() => {
@@ -125,6 +127,12 @@ function TradingDashboard() {
         }
         setAnalyses(analysesMap)
         
+        // Fetch P&L history
+        const pnlResponse = await axios.get(`${API_BASE_URL}/api/trading/pnl-history?limit=100`)
+        if (Array.isArray(pnlResponse.data?.history)) {
+          setPnlHistory(pnlResponse.data.history)
+        }
+        
         setLoading(false)
       } catch (error) {
         console.error('Error fetching trading data:', error)
@@ -134,14 +142,31 @@ function TradingDashboard() {
         setLoading(false)
       }
     }
+    
+    const fetchPnlHistory = async () => {
+      try {
+        const pnlResponse = await axios.get(`${API_BASE_URL}/api/trading/pnl-history?limit=100`)
+        if (Array.isArray(pnlResponse.data?.history)) {
+          setPnlHistory(pnlResponse.data.history)
+        }
+      } catch (error) {
+        console.error('Error fetching P&L history:', error)
+      }
+    }
 
     // Fetch immediately
     fetchTradingData()
 
     // Then fetch every 2 seconds for real-time updates
     const interval = setInterval(fetchTradingData, 2000)
+    
+    // Fetch P&L history every 5 seconds (less frequent)
+    const pnlInterval = setInterval(fetchPnlHistory, 5000)
 
-    return () => clearInterval(interval)
+    return () => {
+      clearInterval(interval)
+      clearInterval(pnlInterval)
+    }
   }, [])
 
   const formatCurrency = (value: number) => {
@@ -232,6 +257,57 @@ function TradingDashboard() {
         <div className="stat-card">
           <div className="stat-label">Active Positions</div>
           <div className="stat-value">{stats.activePositions}</div>
+        </div>
+      </div>
+
+      <div className="pnl-chart-section">
+        <h2>P&L Over Time</h2>
+        <div className="pnl-chart-container">
+          {pnlHistory.length > 0 ? (
+            <ResponsiveContainer width="100%" height={300}>
+              <LineChart data={pnlHistory}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#333" />
+                <XAxis 
+                  dataKey="timestamp" 
+                  stroke="#888"
+                  tick={{ fill: '#888', fontSize: 12 }}
+                  tickFormatter={(value) => {
+                    const date = new Date(value)
+                    return `${date.getHours()}:${date.getMinutes().toString().padStart(2, '0')}`
+                  }}
+                />
+                <YAxis 
+                  stroke="#888"
+                  tick={{ fill: '#888', fontSize: 12 }}
+                  tickFormatter={(value) => `$${value.toFixed(0)}`}
+                />
+                <Tooltip 
+                  contentStyle={{ 
+                    backgroundColor: '#1a1a1a', 
+                    border: '1px solid #333',
+                    borderRadius: '4px',
+                    color: '#e0e0e0'
+                  }}
+                  labelFormatter={(value) => {
+                    const date = new Date(value)
+                    return date.toLocaleString()
+                  }}
+                  formatter={(value: any) => [formatCurrency(value), 'P&L']}
+                />
+                <Legend wrapperStyle={{ color: '#888' }} />
+                <Line 
+                  type="monotone" 
+                  dataKey="pnl" 
+                  stroke="#00FF00" 
+                  strokeWidth={2}
+                  dot={false}
+                  name="P&L"
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="empty-state">No P&L history yet</div>
+          )}
         </div>
       </div>
 

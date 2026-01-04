@@ -72,6 +72,7 @@ class TradingBot:
         self.trades: List[SimulatedTrade] = []
         self.market_analyses: Dict[str, MarketAnalysis] = {}
         self.price_history: Dict[str, List[Tuple[datetime, float]]] = {}  # Track price history
+        self.pnl_history: List[Tuple[datetime, float]] = []  # Track P&L over time for charting
         self.is_running: bool = True
         self._task: Optional[asyncio.Task] = None
         self._position_update_task: Optional[asyncio.Task] = None
@@ -587,6 +588,8 @@ class TradingBot:
             try:
                 if self.positions:
                     await self._update_positions(polymarket_client=polymarket_client)
+                    # Update P&L history after position updates
+                    self._update_pnl_history()
                 await asyncio.sleep(2)  # Update every 2 seconds
             except asyncio.CancelledError:
                 break
@@ -662,11 +665,12 @@ class TradingBot:
                     outcome = opp['outcome']
                     market_title = market.get('question') or market.get('title') or market.get('name') or 'Unknown'
                     
-                    # Scalp position size: $0.50-$2.00 range (around $1)
+                    # Scalp position size: Flexible based on volume and balance (target ~$1, but can vary)
                     base_size = 1.0
                     volume_multiplier = 0.5 + (min(analysis.volume_score, 50) / 50) * 1.5
                     position_size = base_size * volume_multiplier
-                    position_size = max(0.5, min(position_size, 2.0))
+                    # Allow any size from $0.10 to balance (no artificial cap)
+                    position_size = max(0.10, min(position_size, self.balance * 0.10))
                     
                     if position_size > self.balance:
                         continue
@@ -674,14 +678,29 @@ class TradingBot:
                     price_yes, price_no = self._get_outcome_prices(market)
                     price = price_yes if outcome in ['Yes', 'YES', 'yes'] else price_no
                     
-                    # Quick checks: reasonable price and spread
-                    if price < 0.05 or price > 0.95:  # Avoid extreme prices for scalping
+                    # Only filter out invalid prices (exactly 0 or 1, or outside 0-1 range)
+                    if price <= 0 or price >= 1.0:
+                        continue
+                    
+                    # Adjust position size based on remaining profit margin
+                    # If buying at 0.98, max profit is 0.02 per share, so we need larger size
+                    max_profit_per_share = 1.0 - price if outcome in ['Yes', 'YES', 'yes'] else price
+                    if max_profit_per_share <= 0:
+                        continue  # No profit potential
+                    
+                    # Scale position size inversely with profit margin to maintain target profit
+                    # Example: At 0.98 price (0.02 margin), we need 5x size to get same $ profit as at 0.50
+                    profit_margin_factor = max(0.02, max_profit_per_share)  # Minimum 2% margin
+                    adjusted_position_size = position_size / profit_margin_factor
+                    adjusted_position_size = max(0.10, min(adjusted_position_size, self.balance * 0.15))  # Cap at 15% for scalps
+                    
+                    if adjusted_position_size > self.balance:
                         continue
                     
                     # Execute scalp trade
-                    reason = f"Volume Scalp: {outcome} (Vol: {analysis.volume:.0f}, VolScore: {analysis.volume_score:.1f})"
+                    reason = f"Volume Scalp: {outcome} @ {price:.3f} (Vol: {analysis.volume:.0f}, Margin: {max_profit_per_share:.3f})"
                     await self._open_position(market, analysis, outcome, market_title, price,
-                                            position_size, 'volume_scalp', reason, 'scalp')
+                                            adjusted_position_size, 'volume_scalp', reason, 'scalp')
                 
                 # Wait 2-5 seconds before next scalping cycle (randomized to avoid patterns)
                 wait_time = 2 + random.random() * 3  # 2-5 seconds
@@ -746,17 +765,21 @@ class TradingBot:
             'trade_type': 'swing'  # Momentum trades are swing trades
                 })
             
-            # Strategy 3: Mean reversion (expanded price ranges)
-            elif (0.20 < analysis.price_yes < 0.40 or 0.60 < analysis.price_yes < 0.80):  # Expanded from 0.15-0.25 and 0.75-0.85
+            # Strategy 3: Mean reversion (works at any price - looks for markets far from 0.5)
+            # Can trade at high prices (0.98) if expecting reversion, or low prices (0.02)
+            elif ((analysis.price_yes < 0.45 or analysis.price_yes > 0.55) and 
+                  abs(analysis.trend) > 0.5):  # Price away from 0.5 and showing trend
                 direction = 'Yes' if analysis.price_yes < 0.5 else 'No'
+                # Higher priority if price is more extreme (bigger reversion opportunity)
+                priority_bonus = abs(analysis.price_yes - 0.5) * 50  # Bonus for extreme prices
                 opportunities.append({
                     'market': market,
                     'analysis': analysis,
                     'strategy': 'mean_reversion',
-            'priority': 30,  # Lowered from 40
-            'outcome': direction,
-            'expected_profit_pct': 5,
-            'trade_type': 'swing'  # Mean reversion are swing trades
+                    'priority': 30 + priority_bonus,  # Higher priority for extreme prices
+                    'outcome': direction,
+                    'expected_profit_pct': 5,
+                    'trade_type': 'swing'  # Mean reversion are swing trades
                 })
             
             # Strategy 4: Volume breakouts (relaxed)
@@ -832,7 +855,8 @@ class TradingBot:
         
         # Arbitrage: Buy both outcomes
         if strategy == 'arbitrage' and outcome_str == 'both':
-            if self.balance < 100:  # Need at least $100 for arbitrage
+            # Allow arbitrage with any balance (removed $100 minimum)
+            if self.balance < 1.0:  # Just need at least $1
                 return
             
             price_yes = analysis.price_yes
@@ -842,25 +866,29 @@ class TradingBot:
             if total_cost >= 0.99:  # Not profitable after fees
                 return
             
-            # Calculate position size (use up to 20% of balance)
+            # Flexible position sizing: 5-20% of balance for arbitrage
             max_investment = self.balance * 0.20
-            shares = max_investment / total_cost
+            min_investment = max(self.balance * 0.05, 1.0)  # At least $1 or 5% of balance, whichever is higher
+            
+            # Use amount between min and max
+            investment = min(max_investment, max(min_investment, self.balance * 0.10))
+            shares = investment / total_cost
             
             # Buy Yes
             cost_yes = shares * price_yes
-            if cost_yes <= self.balance:
+            if cost_yes <= self.balance and cost_yes >= 0.10:  # Minimum $0.10 position
                 position_key_yes = f"{analysis.market_id}-Yes"
                 if position_key_yes not in self.positions:
                     await self._open_position(market, analysis, 'Yes', market_title, price_yes, 
-                                            cost_yes, strategy, f"Arbitrage: Buy Yes at {price_yes:.3f}")
+                                            cost_yes, strategy, f"Arbitrage: Buy Yes at {price_yes:.3f}", 'swing')
             
             # Buy No
             cost_no = shares * price_no
-            if cost_no <= self.balance:
+            if cost_no <= self.balance and cost_no >= 0.10:  # Minimum $0.10 position
                 position_key_no = f"{analysis.market_id}-No"
                 if position_key_no not in self.positions:
                     await self._open_position(market, analysis, 'No', market_title, price_no,
-                                            cost_no, strategy, f"Arbitrage: Buy No at {price_no:.3f}")
+                                            cost_no, strategy, f"Arbitrage: Buy No at {price_no:.3f}", 'swing')
         
         else:
             # Regular directional trade
@@ -868,9 +896,18 @@ class TradingBot:
             price = analysis.price_yes if outcome in ['Yes', 'YES', 'yes'] else analysis.price_no
             position_key = f"{analysis.market_id}-{outcome}"
             
+            # Only filter out invalid prices (exactly 0 or 1, or outside 0-1 range)
+            if price <= 0 or price >= 1.0:
+                return
+            
             # Don't open if position already exists
             if position_key in self.positions:
                 return
+            
+            # Calculate remaining profit margin
+            max_profit_per_share = 1.0 - price if outcome in ['Yes', 'YES', 'yes'] else price
+            if max_profit_per_share <= 0:
+                return  # No profit potential
             
             # Determine trade type from opportunity
             trade_type = opportunity.get('trade_type', 'swing')
@@ -878,42 +915,53 @@ class TradingBot:
             # Calculate position size based on strategy and trade type
             # Note: Scalping positions are calculated in _scalping_loop()
             if trade_type == 'scalp':
-                # This shouldn't be called from here, but handle it anyway
+                # This shouldn't be called from here, but handle it anyway - flexible sizing
                 base_scalp_size = 1.0
                 volume_multiplier = 0.5 + (min(analysis.volume_score, 50) / 50) * 1.5
                 position_size = base_scalp_size * volume_multiplier
-                position_size = max(0.5, min(position_size, 2.0))
+                position_size = max(0.10, min(position_size, self.balance * 0.10))  # Min $0.10, max 10% of balance
             else:
-                # Swing trading: Larger positions based on context
+                # Swing trading: Flexible positions based on context and balance
                 if strategy == 'context_swing':
-                    # Context-based swing: 3-8% of balance
-                    position_size = self.balance * (0.03 + (abs(analysis.context_score) / 100) * 0.05)
+                    # Context-based swing: 2-10% of balance (flexible)
+                    position_size = self.balance * (0.02 + (abs(analysis.context_score) / 100) * 0.08)
                 elif strategy == 'momentum':
-                    # 3-8% of balance for momentum trades
-                    position_size = self.balance * (0.03 + (abs(analysis.score) / 100) * 0.05)
+                    # 2-10% of balance for momentum trades
+                    position_size = self.balance * (0.02 + (abs(analysis.score) / 100) * 0.08)
                 elif strategy == 'mean_reversion':
-                    # 2-5% for mean reversion
-                    position_size = self.balance * 0.04
+                    # 1.5-6% for mean reversion
+                    position_size = self.balance * (0.015 + (abs(analysis.score) / 100) * 0.045)
                 elif strategy == 'volume_breakout':
-                    # 4-7% for volume breakouts
-                    position_size = self.balance * 0.05
+                    # 3-8% for volume breakouts
+                    position_size = self.balance * (0.03 + (abs(analysis.score) / 100) * 0.05)
                 elif strategy == 'general':
-                    # 1.5-3% for general opportunities
-                    position_size = self.balance * 0.025
+                    # 1-5% for general opportunities
+                    position_size = self.balance * (0.01 + (abs(analysis.score) / 100) * 0.04)
                 else:
                     position_size = self.balance * 0.03
                 
-                # Cap swing position size
-                position_size = min(position_size, self.balance * 0.15, 150.0)  # Max 15% or $150 for swings
-                position_size = max(position_size, 5.0)  # Min $5 for swings
+                # Flexible swing position sizing - no artificial minimum, max based on balance
+                position_size = min(position_size, self.balance * 0.20)  # Max 20% of balance
+                position_size = max(position_size, 1.0)  # Minimum $1 for swings (much lower than before)
             
-            if position_size <= self.balance:
+            # Adjust position size based on profit margin for high-priced near-certain outcomes
+            # Example: Buying Yes at 0.98 (2% margin) needs larger size to capture meaningful profit
+            # Scale up position size inversely with profit margin, but cap it
+            profit_margin_factor = max(0.02, max_profit_per_share)  # Minimum 2% margin for calculation
+            adjusted_position_size = position_size / profit_margin_factor
+            
+            # Cap adjusted size to prevent excessive risk
+            max_adjusted_size = self.balance * 0.25 if trade_type == 'swing' else self.balance * 0.15
+            adjusted_position_size = min(adjusted_position_size, max_adjusted_size)
+            adjusted_position_size = max(adjusted_position_size, position_size * 0.5)  # Don't reduce below 50% of base
+            
+            if adjusted_position_size <= self.balance and adjusted_position_size >= 0.10:
                 if trade_type == 'scalp':
-                    reason = f"Volume Scalp: {outcome} (Vol: {analysis.volume:.0f}, Size: ${position_size:.2f})"
+                    reason = f"Volume Scalp: {outcome} @ {price:.3f} (Vol: {analysis.volume:.0f}, Margin: {max_profit_per_share:.3f})"
                 else:
-                    reason = f"{strategy.title()}: {outcome} signal (Vol: {analysis.volume:.0f}, Context: {analysis.context_score:.1f})"
+                    reason = f"{strategy.title()}: {outcome} @ {price:.3f} (Vol: {analysis.volume:.0f}, Margin: {max_profit_per_share:.3f})"
                 await self._open_position(market, analysis, outcome, market_title, price,
-                                        position_size, strategy, reason, trade_type)
+                                        adjusted_position_size, strategy, reason, trade_type)
     
     async def _check_exit_conditions(self, markets: List[dict]):
         """Check all open positions for exit conditions."""
@@ -981,10 +1029,14 @@ class TradingBot:
                     exit_reason = "Stop loss: Momentum reversed"
             
             elif position.strategy == 'mean_reversion':
-                # Exit when price returns to mean (0.45-0.55)
-                if 0.45 <= analysis.price_yes <= 0.55:
+                # Exit when price moves significantly toward equilibrium (works at any price)
+                price_from_equilibrium = abs(analysis.price_yes - 0.5)
+                entry_from_equilibrium = abs(position.entry_price - 0.5)
+                
+                # Exit if price moved significantly toward 0.5 (reversion occurred)
+                if price_from_equilibrium < entry_from_equilibrium * 0.7:  # Price moved 30%+ toward 0.5
                     should_exit = True
-                    exit_reason = "Mean reversion: Price returned to equilibrium"
+                    exit_reason = f"Mean reversion: Price moved toward equilibrium ({analysis.price_yes:.3f})"
                 # Or take profit at 10%
                 elif profit_pct > 0.10:
                     should_exit = True
@@ -1070,6 +1122,9 @@ class TradingBot:
         # Add balance back with profit/loss
         self.balance += position.size + profit
         
+        # Update P&L history after closing position
+        self._update_pnl_history()
+        
         trade = SimulatedTrade(
             id=f"trade-{datetime.now().timestamp()}-{random.random()}",
             market_id=position.market_id,
@@ -1088,6 +1143,36 @@ class TradingBot:
         self.trades.insert(0, trade)
         del self.positions[position_key]
     
+    def _update_pnl_history(self):
+        """Update P&L history for charting."""
+        current_time = datetime.now()
+        
+        # Calculate total P&L (realized + unrealized)
+        completed_trades = [t for t in self.trades if t.profit is not None]
+        realized_pnl = sum(t.profit for t in completed_trades if t.profit is not None)
+        
+        # Calculate unrealized P&L from open positions
+        unrealized_pnl = sum(p.unrealized_pnl for p in self.positions.values())
+        
+        total_pnl = realized_pnl + unrealized_pnl
+        
+        # Add to history (only if it changed significantly or enough time passed)
+        if not self.pnl_history:
+            # Initialize with starting point
+            self.pnl_history.append((current_time, 0.0))
+        else:
+            # Only add if P&L changed by >$0.10 or 30+ seconds passed
+            last_time, last_pnl = self.pnl_history[-1]
+            time_diff = (current_time - last_time).total_seconds()
+            pnl_diff = abs(total_pnl - last_pnl)
+            
+            if pnl_diff > 0.10 or time_diff > 30:
+                self.pnl_history.append((current_time, total_pnl))
+        
+        # Keep only last 200 data points (to prevent memory issues)
+        if len(self.pnl_history) > 200:
+            self.pnl_history = self.pnl_history[-200:]
+    
     def get_stats(self) -> dict:
         """Get trading statistics."""
         completed_trades = [t for t in self.trades if t.profit is not None]
@@ -1095,6 +1180,9 @@ class TradingBot:
         losing_trades = [t for t in completed_trades if t.profit and t.profit <= 0]
         
         total_profit = sum(t.profit for t in completed_trades if t.profit is not None)
+        
+        # Update P&L history when getting stats
+        self._update_pnl_history()
         
         return {
             'balance': round(self.balance, 2),

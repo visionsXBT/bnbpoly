@@ -370,6 +370,12 @@ async def get_market_analyses():
     return {"analyses": trading_bot.get_market_analyses()}
 
 
+@app.get("/api/trading/pnl-history")
+async def get_pnl_history(limit: int = 100):
+    """Get P&L history for charting."""
+    return {"history": trading_bot.get_pnl_history(limit=limit)}
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
