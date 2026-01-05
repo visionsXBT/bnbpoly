@@ -102,6 +102,36 @@ class TradingBot:
         else:
             print("TradingBot: Anthropic package not available - using algorithmic strategies")
         
+        # Initialize CLOB client for fetching markets (public methods only)
+        self.clob_client = None
+        self._clob_initialized = False
+        
+    async def _initialize_clob_client(self):
+        """Initialize CLOB client for public data extraction (no private key needed)."""
+        if self._clob_initialized:
+            return
+            
+        try:
+            from py_clob_client.client import ClobClient
+            
+            host = "https://clob.polymarket.com"
+            chain_id = 137  # Polygon mainnet
+            
+            # Initialize client for public methods only (no private key needed)
+            self.clob_client = ClobClient(
+                host=host,
+                chain_id=chain_id
+            )
+            
+            self._clob_initialized = True
+            print("TradingBot: CLOB client initialized successfully (public methods only)")
+        except ImportError:
+            print("TradingBot: py-clob-client not installed - install with: pip install py-clob-client")
+        except Exception as e:
+            print(f"TradingBot: Failed to initialize CLOB client: {e}")
+            import traceback
+            traceback.print_exc()
+        
     def start(self, polymarket_client):
         """Start the trading bot in the background."""
         if self._task is None or self._task.done():
@@ -338,7 +368,8 @@ class TradingBot:
     
     async def analyze_market(self, market: dict) -> MarketAnalysis:
         """Analyze a market with realistic trading strategies."""
-        market_id = market.get('id', '')
+        # Handle both CLOB (condition_id) and Gamma (id) formats
+        market_id = market.get('id') or market.get('condition_id') or market.get('question_id') or ''
         volume = float(market.get('volumeNum', market.get('volume', 0)))
         liquidity = float(market.get('liquidityNum', market.get('liquidity', 0)))
         volume_24h = float(market.get('volume24h', volume))
@@ -787,12 +818,36 @@ class TradingBot:
             try:
                 cycle_count += 1
                 
-                # Fetch markets using expanded search (every cycle, but refresh full list every 10 cycles)
-                if cycle_count == 1 or cycle_count % 10 == 0:
-                    print(f"Performing expanded market search (cycle {cycle_count})...")
-                    markets = await self._fetch_markets_expanded(polymarket_client)
+                # Initialize CLOB client if not already done
+                if not self._clob_initialized:
+                    await self._initialize_clob_client()
+                
+                # Fetch markets from CLOB API
+                markets = []
+                if self.clob_client:
+                    try:
+                        print(f"Fetching markets from CLOB API (cycle {cycle_count})...")
+                        clob_response = await self.clob_client.get_markets()
+                        
+                        if hasattr(clob_response, 'data') and isinstance(clob_response.data, list):
+                            markets = clob_response.data
+                            print(f"Fetched {len(markets)} markets from CLOB API")
+                        elif isinstance(clob_response, dict) and 'data' in clob_response:
+                            markets = clob_response['data']
+                            print(f"Fetched {len(markets)} markets from CLOB API (dict format)")
+                        elif isinstance(clob_response, list):
+                            markets = clob_response
+                            print(f"Fetched {len(markets)} markets from CLOB API (list format)")
+                        else:
+                            print(f"Unexpected CLOB response format: {type(clob_response)}, falling back to Gamma API")
+                            markets = await polymarket_client.get_markets(limit=200, offset=0, use_clob=False)
+                    except Exception as e:
+                        print(f"Error fetching from CLOB API: {e}, falling back to Gamma API")
+                        import traceback
+                        traceback.print_exc()
+                        markets = await polymarket_client.get_markets(limit=200, offset=0, use_clob=False)
                 else:
-                    # In between, just refresh top markets (Gamma API has everything)
+                    print("CLOB client not available, using Gamma API")
                     markets = await polymarket_client.get_markets(limit=200, offset=0, use_clob=False)
                 
                 if not markets:
@@ -851,7 +906,9 @@ class TradingBot:
                         # After enrichment, most markets should have volume from Gamma API
                         if volume > 100 or liquidity > 200 or (volume == 0 and liquidity == 0):
                             analysis = await self.analyze_market(market)
-                            self.market_analyses[analysis.market_id] = analysis
+                            # Use market_id from analysis or fallback to market's ID
+                            analysis_market_id = analysis.market_id or market_id
+                            self.market_analyses[analysis_market_id] = analysis
                             analyzed_count += 1
                             short_term_analyzed += 1
                             
@@ -1087,16 +1144,43 @@ class TradingBot:
             return None
         
         try:
-            # Prepare market data for Claude
+            # Prepare market data for Claude - handle both CLOB and Gamma API formats
             market_title = market.get('question') or market.get('title') or market.get('name', 'Unknown')
-            volume = analysis.volume
-            liquidity = analysis.liquidity
+            description = market.get('description', '')
+            
+            # Extract prices from CLOB tokens if available
             price_yes = analysis.price_yes
             price_no = analysis.price_no
+            
+            # Try to get prices from CLOB tokens directly
+            if market.get('tokens') and isinstance(market.get('tokens'), list):
+                for token in market['tokens']:
+                    if isinstance(token, dict):
+                        outcome = str(token.get('outcome', '')).strip().upper()
+                        price = token.get('price')
+                        if price is not None:
+                            try:
+                                price_float = float(price)
+                                if 0 < price_float < 1:
+                                    if outcome in ['YES', 'YES ']:
+                                        price_yes = price_float
+                                    elif outcome in ['NO', 'NO ']:
+                                        price_no = price_float
+                            except (ValueError, TypeError):
+                                continue
+            
+            volume = analysis.volume
+            liquidity = analysis.liquidity
             momentum = analysis.momentum
             trend = analysis.trend
             sentiment = analysis.sentiment
             score = analysis.score
+            
+            # Get market metadata from CLOB format
+            end_date = market.get('end_date_iso') or market.get('endDate') or market.get('endDateISO8601', 'Unknown')
+            active = market.get('active', True)
+            closed = market.get('closed', False)
+            accepting_orders = market.get('accepting_orders', True)
             
             # Get price history for context
             price_history_str = "No price history yet"
@@ -1114,9 +1198,15 @@ class TradingBot:
 
 MARKET INFORMATION:
 - Title: {market_title}
+- Description: {description[:200] if description else 'N/A'}
 - Market ID: {analysis.market_id}
+- Condition ID: {market.get('condition_id', 'N/A')}
 - Current Yes Price: ${price_yes:.4f}
 - Current No Price: ${price_no:.4f}
+- End Date: {end_date}
+- Active: {active}
+- Closed: {closed}
+- Accepting Orders: {accepting_orders}
 - Volume (24h): ${volume:,.2f}
 - Liquidity: ${liquidity:,.2f}
 - Momentum: {momentum:.2f}%
@@ -1136,6 +1226,7 @@ TRADING CONSTRAINTS:
 - Entry price must be between $0.10 and $0.99
 - Only trade markets resolving in 1-2 weeks
 - Don't open duplicate positions
+- Only trade if market is active and accepting orders
 
 Analyze this market and provide a trading decision in JSON format:
 {{
@@ -1151,6 +1242,7 @@ Consider:
 2. What direction (Yes/No) has better risk/reward?
 3. What position size is appropriate given the confidence level?
 4. Are there any risks or concerns?
+5. Is the market active and accepting orders?
 
 Respond ONLY with valid JSON, no other text."""
 
@@ -1199,8 +1291,13 @@ Respond ONLY with valid JSON, no other text."""
         opportunities = []
         
         # Collect all trading opportunities from analyzed markets
+        # Handle both CLOB (condition_id) and Gamma (id) formats
         analyzed_market_ids = set(self.market_analyses.keys())
-        tradeable_markets = [m for m in markets if m.get('id') in analyzed_market_ids]
+        tradeable_markets = []
+        for m in markets:
+            market_id = m.get('id') or m.get('condition_id') or m.get('question_id')
+            if market_id and market_id in analyzed_market_ids:
+                tradeable_markets.append(m)
         
         print(f"_execute_trades: {len(analyzed_market_ids)} analyzed markets, {len(tradeable_markets)} tradeable markets")
         
@@ -1209,7 +1306,7 @@ Respond ONLY with valid JSON, no other text."""
             print(f"Using Claude AI for trading decisions... ({len(tradeable_markets)} tradeable markets)")
             claude_opportunities = 0
             for market in tradeable_markets[:15]:  # Limit to 15 markets per cycle to avoid rate limits
-                market_id = market.get('id')
+                market_id = market.get('id') or market.get('condition_id') or market.get('question_id')
                 if not market_id:
                     continue
                 
@@ -1218,6 +1315,14 @@ Respond ONLY with valid JSON, no other text."""
                     continue
                 
                 if not self._is_market_in_resolution_window(market):
+                    continue
+                
+                # Check if market is active and accepting orders (CLOB format)
+                if not market.get('active', True):
+                    continue
+                if market.get('closed', False):
+                    continue
+                if not market.get('accepting_orders', True):
                     continue
                 
                 analysis = self.market_analyses.get(market_id)
