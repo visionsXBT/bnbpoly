@@ -136,15 +136,25 @@ function TradingDashboard() {
         }
 
         // Fetch positions
+        console.log('TradingDashboard: Fetching positions from:', `${API_BASE_URL}/api/trading/positions`)
         const positionsResponse = await axios.get(`${API_BASE_URL}/api/trading/positions`)
-        setPositions(Array.isArray(positionsResponse.data?.positions) ? positionsResponse.data.positions : [])
+        console.log('TradingDashboard: Positions response:', positionsResponse.data)
+        const positionsList = Array.isArray(positionsResponse.data?.positions) ? positionsResponse.data.positions : []
+        console.log('TradingDashboard: Setting positions:', positionsList.length)
+        setPositions(positionsList)
 
         // Fetch trades
+        console.log('TradingDashboard: Fetching trades from:', `${API_BASE_URL}/api/trading/trades?limit=100`)
         const tradesResponse = await axios.get(`${API_BASE_URL}/api/trading/trades?limit=100`)
-        setTrades(Array.isArray(tradesResponse.data?.trades) ? tradesResponse.data.trades : [])
+        console.log('TradingDashboard: Trades response:', tradesResponse.data)
+        const tradesList = Array.isArray(tradesResponse.data?.trades) ? tradesResponse.data.trades : []
+        console.log('TradingDashboard: Setting trades:', tradesList.length)
+        setTrades(tradesList)
 
         // Fetch analyses
+        console.log('TradingDashboard: Fetching analyses from:', `${API_BASE_URL}/api/trading/analyses`)
         const analysesResponse = await axios.get(`${API_BASE_URL}/api/trading/analyses`)
+        console.log('TradingDashboard: Analyses response:', analysesResponse.data)
         const analysesMap = new Map<string, MarketAnalysis>()
         if (Array.isArray(analysesResponse.data?.analyses)) {
           analysesResponse.data.analyses.forEach((a: MarketAnalysis) => {
@@ -153,15 +163,18 @@ function TradingDashboard() {
             }
           })
         }
+        console.log('TradingDashboard: Setting analyses:', analysesMap.size)
         setAnalyses(analysesMap)
         
         // Fetch P&L history
+        console.log('TradingDashboard: Fetching P&L history from:', `${API_BASE_URL}/api/trading/pnl-history?limit=100`)
         const pnlResponse = await axios.get(`${API_BASE_URL}/api/trading/pnl-history?limit=100`, {
           timeout: 5000
         })
-        if (Array.isArray(pnlResponse.data?.history)) {
-          setPnlHistory(pnlResponse.data.history)
-        }
+        console.log('TradingDashboard: P&L history response:', pnlResponse.data)
+        const pnlList = Array.isArray(pnlResponse.data?.history) ? pnlResponse.data.history : []
+        console.log('TradingDashboard: Setting P&L history:', pnlList.length)
+        setPnlHistory(pnlList)
         
         // Success - reset error count and mark as connected
         setBackendConnected(true)

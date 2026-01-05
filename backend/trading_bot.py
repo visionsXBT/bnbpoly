@@ -551,12 +551,12 @@ class TradingBot:
                         if not self._is_market_in_resolution_window(market):
                             continue  # Skip long-term markets
                         
-                        # Filter: only analyze markets with minimum volume/liquidity
+                        # Filter: only analyze markets with minimum volume/liquidity (very relaxed)
                         volume = float(market.get('volumeNum', market.get('volume', 0)))
                         liquidity = float(market.get('liquidityNum', market.get('liquidity', 0)))
                         
-                        # Include if volume > 200 or liquidity > 500 (very relaxed thresholds)
-                        if volume > 200 or liquidity > 500:
+                        # Include if volume > 100 or liquidity > 200 (much more relaxed)
+                        if volume > 100 or liquidity > 200:
                             analysis = await self.analyze_market(market)
                             self.market_analyses[analysis.market_id] = analysis
                             analyzed_count += 1
@@ -891,6 +891,19 @@ class TradingBot:
                     'expected_profit_pct': 4,
                     'trade_type': 'swing'  # Default to swing
                 })
+            
+            # Strategy 8: Ultra-permissive catch-all - trade on ANY analyzed market with minimal requirements
+            elif abs(analysis.score) > 0 and (analysis.volume > 100 or analysis.liquidity > 100):
+                direction = 'Yes' if analysis.score > 0 else 'No'
+                opportunities.append({
+                    'market': market,
+                    'analysis': analysis,
+                    'strategy': 'catch_all',
+                    'priority': 1,  # Low priority but will execute if nothing else
+                    'outcome': direction,
+                    'expected_profit_pct': 2,
+                    'trade_type': 'swing'
+                })
         
         # Sort by priority and execute top opportunities
         opportunities.sort(key=lambda x: x['priority'], reverse=True)
@@ -1031,12 +1044,17 @@ class TradingBot:
                 elif strategy == 'general':
                     # 1-5% for general opportunities
                     position_size = self.balance * (0.01 + (abs(analysis.score) / 100) * 0.04)
+                elif strategy == 'catch_all':
+                    # 0.5-3% for catch-all (very small positions)
+                    position_size = self.balance * (0.005 + (abs(analysis.score) / 100) * 0.025)
                 else:
                     position_size = self.balance * 0.03
                 
                 # Flexible swing position sizing - no artificial minimum, max based on balance
                 position_size = min(position_size, self.balance * 0.20)  # Max 20% of balance
-                position_size = max(position_size, 1.0)  # Minimum $1 for swings (much lower than before)
+                # Lower minimum for catch-all strategy
+                min_size = 0.50 if strategy == 'catch_all' else 1.0
+                position_size = max(position_size, min_size)  # Minimum $0.50 for catch-all, $1 for others
             
             # Adjust position size based on profit margin for high-priced near-certain outcomes
             # Example: Buying Yes at 0.98 (2% margin) needs larger size to capture meaningful profit
@@ -1053,6 +1071,8 @@ class TradingBot:
             if adjusted_position_size <= self.balance and adjusted_position_size >= 0.10:
                 if trade_type == 'scalp':
                     reason = f"Volume Scalp: {outcome} @ {price:.3f} (Vol: {analysis.volume:.0f}, Margin: {max_profit_per_share:.3f})"
+                elif strategy == 'catch_all':
+                    reason = f"Catch-All: {outcome} @ {price:.3f} (Score: {analysis.score:.1f}, Vol: {analysis.volume:.0f})"
                 else:
                     reason = f"{strategy.title()}: {outcome} @ {price:.3f} (Vol: {analysis.volume:.0f}, Margin: {max_profit_per_share:.3f})"
                 print(f"  -> Opening position: {outcome} @ ${price:.3f}, size: ${adjusted_position_size:.2f}")
