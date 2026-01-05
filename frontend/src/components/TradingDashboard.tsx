@@ -8,6 +8,9 @@ import './TradingDashboard.css'
 // In production, always use relative URLs so the proxy can handle routing
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || ''
 
+// Debug: Log API base URL
+console.log('TradingDashboard API_BASE_URL:', API_BASE_URL || '(empty - using relative URLs)')
+
 interface SimulatedTrade {
   id: string
   marketId: string
@@ -76,14 +79,19 @@ function TradingDashboard() {
 
   // Fetch markets for analysis display
   useEffect(() => {
+    console.log('TradingDashboard: Fetching markets...')
     const fetchMarkets = async () => {
       try {
-        const response = await axios.get<{markets: any[]}>(`${API_BASE_URL}/api/markets?limit=50`)
+        const url = `${API_BASE_URL}/api/markets?limit=50`
+        console.log('TradingDashboard: Fetching from URL:', url)
+        const response = await axios.get<{markets: any[]}>(url)
+        console.log('TradingDashboard: Markets response:', response.data)
         if (response.data.markets && Array.isArray(response.data.markets)) {
           setMarkets(response.data.markets)
+          console.log('TradingDashboard: Set markets:', response.data.markets.length)
         }
       } catch (error) {
-        console.error('Error fetching markets:', error)
+        console.error('TradingDashboard: Error fetching markets:', error)
         // Don't set error state for markets, just log it
       }
     }
@@ -92,17 +100,22 @@ function TradingDashboard() {
 
   // Fetch trading data from backend
   useEffect(() => {
+    console.log('TradingDashboard: Setting up trading data fetcher...')
     const fetchTradingData = async () => {
       try {
+        console.log('TradingDashboard: Fetching trading data...')
         // Only show error after multiple consecutive failures
         if (errorCount < 3) {
           setError(null)
         }
         
         // Fetch stats
-        const statsResponse = await axios.get(`${API_BASE_URL}/api/trading/stats`, {
+        const statsUrl = `${API_BASE_URL}/api/trading/stats`
+        console.log('TradingDashboard: Fetching stats from:', statsUrl)
+        const statsResponse = await axios.get(statsUrl, {
           timeout: 5000 // 5 second timeout
         })
+        console.log('TradingDashboard: Stats response:', statsResponse.data)
         if (statsResponse.data) {
           setStats({
             balance: statsResponse.data.balance ?? 2000,
