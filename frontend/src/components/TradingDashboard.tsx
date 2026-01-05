@@ -4,7 +4,8 @@ import axios from 'axios'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import './TradingDashboard.css'
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || ''
+// Use relative URLs in production (proxy handles routing), or explicit URL if set
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || (import.meta.env.PROD ? '' : '')
 
 interface SimulatedTrade {
   id: string
