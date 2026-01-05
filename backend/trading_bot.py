@@ -206,12 +206,45 @@ class TradingBot:
         return True
     
     async def _get_outcome_prices(self, market: dict, polymarket_client=None) -> Tuple[Optional[float], Optional[float]]:
-        """Extract Yes and No prices from market data."""
-        # Try different possible field names for prices
-        outcomes = market.get('outcomes', [])
-        
+        """Extract Yes and No prices from market data, prioritizing CLOB API tokens."""
+        market_id = market.get('id') or market.get('condition_id') or market.get('question_id')
         price_yes = None
         price_no = None
+        
+        # 1. Try CLOB API tokens array first (most accurate)
+        if market.get('tokens') and isinstance(market.get('tokens'), list):
+            for token in market['tokens']:
+                if isinstance(token, dict):
+                    outcome = str(token.get('outcome', '')).upper()
+                    price = token.get('price')
+                    if price is not None:
+                        try:
+                            price_float = float(price)
+                            if 0 < price_float < 1:
+                                if outcome in ['YES', 'YES ']:
+                                    price_yes = price_float
+                                elif outcome in ['NO', 'NO ']:
+                                    price_no = price_float
+                        except (ValueError, TypeError):
+                            continue
+        
+        # 2. Try CLOB API via client if we have condition_id
+        if (price_yes is None or price_no is None) and polymarket_client and hasattr(polymarket_client, 'clob_client') and polymarket_client.clob_client:
+            condition_id = market.get('condition_id') or market.get('conditionId')
+            if condition_id:
+                try:
+                    clob_market = await polymarket_client.clob_client.get_market(condition_id)
+                    if clob_market and clob_market.get('tokens'):
+                        for token in clob_market['tokens']:
+                            if token.get('outcome') == 'Yes' or token.get('outcome') == 'YES':
+                                price_yes = float(token.get('price', 0))
+                            elif token.get('outcome') == 'No' or token.get('outcome') == 'NO':
+                                price_no = float(token.get('price', 0))
+                except Exception as e:
+                    print(f"Warning: CLOB API price fetch failed for market {market_id}: {e}")
+        
+        # 3. Fallback to outcomes array (Gamma API format)
+        outcomes = market.get('outcomes', [])
         
         if outcomes and len(outcomes) >= 2:
             # Try to get prices from outcomes array
@@ -413,7 +446,7 @@ class TradingBot:
         try:
             # Strategy 1: Trending markets (high volume, recent activity) - PRIORITY
             print("Fetching trending markets by volume (prioritized)...")
-            volume_markets = await polymarket_client.get_markets(limit=300, offset=0)
+            volume_markets = await polymarket_client.get_markets(limit=300, offset=0, use_clob=True)
             
             # Separate markets by resolution window
             short_term_markets = []
@@ -438,7 +471,7 @@ class TradingBot:
             print("Fetching high liquidity short-term markets...")
             try:
                 # Fetch with higher offset to get different markets
-                liquidity_markets = await polymarket_client.get_markets(limit=150, offset=100)
+                liquidity_markets = await polymarket_client.get_markets(limit=150, offset=100, use_clob=True)
                 short_term_count = 0
                 for market in liquidity_markets:
                     market_id = market.get('id')
@@ -512,10 +545,13 @@ class TradingBot:
             import traceback
             traceback.print_exc()
             # Fallback to basic fetch
-            return await polymarket_client.get_markets(limit=100, offset=0)
+            return await polymarket_client.get_markets(limit=100, offset=0, use_clob=True)
     
     async def _trading_loop(self, polymarket_client):
         """Main trading loop that runs continuously."""
+        print("=" * 60)
+        print("TRADING LOOP STARTED")
+        print("=" * 60)
         cycle_count = 0
         while self.is_running:
             try:
@@ -526,8 +562,8 @@ class TradingBot:
                     print(f"Performing expanded market search (cycle {cycle_count})...")
                     markets = await self._fetch_markets_expanded(polymarket_client)
                 else:
-                    # In between, just refresh top markets
-                    markets = await polymarket_client.get_markets(limit=200, offset=0)
+                    # In between, just refresh top markets (use CLOB API for trading bot)
+                    markets = await polymarket_client.get_markets(limit=200, offset=0, use_clob=True)
                 
                 if not markets:
                     print("WARNING: No markets fetched from Polymarket API")
@@ -548,7 +584,28 @@ class TradingBot:
                             continue
                         
                         # CRITICAL: Only analyze markets that resolve in 1-2 weeks
-                        if not self._is_market_in_resolution_window(market):
+                        # TEMPORARILY RELAXED: Allow markets up to 4 weeks for testing
+                        resolution_ok = self._is_market_in_resolution_window(market)
+                        # Also allow markets resolving in 2-4 weeks for more opportunities
+                        if not resolution_ok:
+                            # Check if market resolves in 2-4 weeks as fallback
+                            try:
+                                end_date_str = market.get('endDate') or market.get('end_date') or market.get('endDateISO8601')
+                                if end_date_str:
+                                    if 'T' in end_date_str or end_date_str.endswith('Z'):
+                                        end_date = datetime.fromisoformat(end_date_str.replace('Z', '+00:00'))
+                                    else:
+                                        end_date = datetime.strptime(end_date_str.split('T')[0], '%Y-%m-%d')
+                                    now = datetime.now(end_date.tzinfo) if end_date.tzinfo else datetime.now()
+                                    days_until_resolution = (end_date - now).days
+                                    if 14 <= days_until_resolution <= 28:  # 2-4 weeks
+                                        resolution_ok = True
+                                        print(f"  Allowing 2-4 week market: {days_until_resolution} days")
+                            except Exception as e:
+                                # On error parsing date, allow the market
+                                resolution_ok = True
+                        
+                        if not resolution_ok:
                             continue  # Skip long-term markets
                         
                         # Filter: only analyze markets with minimum volume/liquidity (very relaxed)
@@ -578,6 +635,10 @@ class TradingBot:
                 
                 # Find trading opportunities from analyzed markets
                 print(f"Executing trades on {len(self.market_analyses)} analyzed markets...")
+                if len(self.market_analyses) == 0:
+                    print("WARNING: No markets have been analyzed! Cannot execute trades.")
+                else:
+                    print(f"Market analyses available: {list(self.market_analyses.keys())[:5]}...")  # Show first 5
                 await self._execute_trades(markets)
                 
                 # Cleanup: Remove old analyses for markets we're no longer tracking
@@ -672,7 +733,7 @@ class TradingBot:
         while self.is_running:
             try:
                 # Fetch high-volume markets for scalping (top 100 by volume)
-                markets = await polymarket_client.get_markets(limit=100, offset=0)
+                markets = await polymarket_client.get_markets(limit=100, offset=0, use_clob=True)
                 
                 if not markets:
                     await asyncio.sleep(3)
@@ -789,6 +850,8 @@ class TradingBot:
         analyzed_market_ids = set(self.market_analyses.keys())
         tradeable_markets = [m for m in markets if m.get('id') in analyzed_market_ids]
         
+        print(f"_execute_trades: {len(analyzed_market_ids)} analyzed markets, {len(tradeable_markets)} tradeable markets")
+        
         for market in tradeable_markets:
             market_id = market.get('id')
             if not market_id:
@@ -808,6 +871,10 @@ class TradingBot:
             
             market_title = market.get('question') or market.get('title') or market.get('name') or 'Unknown Market'
             outcomes = market.get('outcomes', ['Yes', 'No'])
+            
+            # Debug: Log analysis scores
+            if len(opportunities) < 3:  # Only log first few to avoid spam
+                print(f"  Market {market_id[:20]}...: score={analysis.score:.1f}, volume={analysis.volume:.0f}, context_score={analysis.context_score:.1f}")
             
             # Strategy 1: Arbitrage (highest priority)
             if analysis.arbitrage_opportunity:
@@ -1376,7 +1443,7 @@ class TradingBot:
     
     def get_market_analyses(self) -> List[dict]:
         """Get market analyses as dictionaries."""
-        return [
+        analyses_list = [
             {
                 'marketId': a.market_id,
                 'volume': round(a.volume, 2),
@@ -1393,6 +1460,8 @@ class TradingBot:
             }
             for a in self.market_analyses.values()
         ]
+        print(f"get_market_analyses: Returning {len(analyses_list)} analyses")
+        return analyses_list
 
 
 # Global trading bot instance

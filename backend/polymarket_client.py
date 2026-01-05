@@ -36,11 +36,109 @@ class PolymarketClient:
         else:
             self.clob_client = None
     
-    async def get_markets(self, limit: int = 20, offset: int = 0) -> List[Dict]:
-        """Fetch current active markets from Polymarket, using API date filtering."""
+    async def get_markets(self, limit: int = 20, offset: int = 0, use_clob: bool = False) -> List[Dict]:
+        """Fetch current active markets from Polymarket.
+        
+        Args:
+            limit: Maximum number of markets to return
+            offset: Offset for pagination
+            use_clob: If True, use CLOB API (for trading bot). If False, use Gamma API (for chat app).
+        """
         try:
             from datetime import datetime, timedelta
             
+            # Use CLOB API for trading bot (more accurate prices)
+            if use_clob and self.clob_client:
+                try:
+                    print(f"Fetching markets from CLOB API (limit={limit})...")
+                    clob_response = await self.clob_client.get_markets()
+                    
+                    # CLOB API returns PaginationPayload: {limit, count, data: Market[]}
+                    markets_data = []
+                    if clob_response:
+                        if hasattr(clob_response, 'data'):
+                            markets_data = clob_response.data
+                        elif isinstance(clob_response, dict) and 'data' in clob_response:
+                            markets_data = clob_response['data']
+                        elif isinstance(clob_response, list):
+                            markets_data = clob_response
+                    
+                    print(f"CLOB API returned {len(markets_data)} markets")
+                    
+                    # Convert CLOB market format to our expected format
+                    converted_markets = []
+                    for market in markets_data:
+                        if not isinstance(market, dict):
+                            continue
+                            
+                        # Convert CLOB format to Gamma format
+                        condition_id = market.get('condition_id')
+                        question_id = market.get('question_id')
+                        market_id = condition_id or question_id or market.get('id')
+                        
+                        if not market_id:
+                            continue
+                            
+                        converted_market = {
+                            'id': market_id,
+                            'condition_id': condition_id,
+                            'question_id': question_id,
+                            'question': market.get('question', ''),
+                            'title': market.get('question', ''),
+                            'endDate': market.get('end_date_iso'),
+                            'end_date': market.get('end_date_iso'),
+                            'endDateISO8601': market.get('end_date_iso'),
+                            'active': market.get('active', True),
+                            'closed': market.get('closed', False),
+                            'archived': market.get('archived', False),
+                            'volumeNum': 0,  # CLOB doesn't provide volume in get_markets()
+                            'volume': 0,
+                            'liquidityNum': 0,
+                            'liquidity': 0,
+                            'tokens': market.get('tokens', []),  # Keep tokens for price extraction
+                            'outcomes': [],  # Convert tokens to outcomes format
+                        }
+                        
+                        # Convert tokens to outcomes format for compatibility
+                        if market.get('tokens'):
+                            for token in market['tokens']:
+                                if isinstance(token, dict):
+                                    outcome_name = token.get('outcome', '')
+                                    price = token.get('price')
+                                    if price is not None:
+                                        converted_market['outcomes'].append({
+                                            'outcome': outcome_name,
+                                            'price': price,
+                                            'title': outcome_name,
+                                            'name': outcome_name,
+                                        })
+                                        
+                                        # Also set direct price fields for compatibility
+                                        outcome_upper = outcome_name.upper()
+                                        if outcome_upper in ['YES', 'YES ']:
+                                            converted_market['newestPrice'] = price
+                                            converted_market['price'] = price
+                                            converted_market['yesPrice'] = price
+                                        elif outcome_upper in ['NO', 'NO ']:
+                                            converted_market['noPrice'] = price
+                        
+                        # Only include active, non-closed, non-archived markets
+                        if (converted_market.get('active') and 
+                            not converted_market.get('closed') and 
+                            not converted_market.get('archived')):
+                            converted_markets.append(converted_market)
+                    
+                    if converted_markets:
+                        print(f"Converted {len(converted_markets)} markets from CLOB format")
+                        return converted_markets[:limit]
+                    else:
+                        print("No valid markets from CLOB API, falling back to Gamma API")
+                except Exception as e:
+                    print(f"CLOB API get_markets failed: {e}, falling back to Gamma API")
+                    import traceback
+                    traceback.print_exc()
+            
+            # Fallback to Gamma API
             url = f"{self.api_url}/markets"
             
             # Use API's end_date_min parameter to only get markets with end dates in the future
