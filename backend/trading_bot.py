@@ -82,6 +82,7 @@ class TradingBot:
         """Start the trading bot in the background."""
         if self._task is None or self._task.done():
             self.is_running = True
+            self.polymarket_client = polymarket_client  # Store client reference for price fetching
             self._task = asyncio.create_task(self._trading_loop(polymarket_client))
             # Start separate position update loop for real-time price updates
             self._position_update_task = asyncio.create_task(self._position_update_loop(polymarket_client))
@@ -202,31 +203,81 @@ class TradingBot:
         
         return True
     
-    def _get_outcome_prices(self, market: dict) -> Tuple[float, float]:
+    async def _get_outcome_prices(self, market: dict, polymarket_client=None) -> Tuple[Optional[float], Optional[float]]:
         """Extract Yes and No prices from market data."""
         # Try different possible field names for prices
         outcomes = market.get('outcomes', [])
         
-        price_yes = 0.5
-        price_no = 0.5
+        price_yes = None
+        price_no = None
         
         if outcomes and len(outcomes) >= 2:
             # Try to get prices from outcomes array
-            outcome_yes = outcomes[0] if isinstance(outcomes[0], dict) else None
-            outcome_no = outcomes[1] if len(outcomes) > 1 and isinstance(outcomes[1], dict) else None
-            
-            if outcome_yes:
-                price_yes = float(outcome_yes.get('price', outcome_yes.get('newestPrice', 0.5)))
-            if outcome_no:
-                price_no = float(outcome_no.get('price', outcome_no.get('newestPrice', 0.5)))
-        else:
-            # Fallback: use main price for Yes, calculate No
-            price_yes = float(market.get('newestPrice', market.get('price', 0.5)))
+            for outcome in outcomes:
+                if not isinstance(outcome, dict):
+                    continue
+                
+                outcome_name = str(outcome.get('outcome', outcome.get('title', outcome.get('name', '')))).upper()
+                
+                # Try multiple price field names
+                price = None
+                for price_field in ['price', 'newestPrice', 'lastPrice', 'currentPrice', 'yesPrice', 'noPrice']:
+                    if price_field in outcome:
+                        try:
+                            price = float(outcome[price_field])
+                            if 0 < price < 1:
+                                break
+                        except (ValueError, TypeError):
+                            continue
+                
+                # If no price found in outcome, try market-level fields
+                if price is None:
+                    for price_field in ['newestPrice', 'price', 'lastPrice', 'currentPrice']:
+                        if price_field in market:
+                            try:
+                                price = float(market[price_field])
+                                if 0 < price < 1:
+                                    break
+                            except (ValueError, TypeError):
+                                continue
+                
+                if price is not None and 0 < price < 1:
+                    if 'YES' in outcome_name or outcome_name == 'YES':
+                        price_yes = price
+                    elif 'NO' in outcome_name or outcome_name == 'NO':
+                        price_no = price
+                    # If we can't determine which outcome, use order (first = Yes, second = No)
+                    elif price_yes is None:
+                        price_yes = price
+                    elif price_no is None:
+                        price_no = price
+        
+        # Fallback: use main market price fields
+        if price_yes is None:
+            for price_field in ['newestPrice', 'price', 'lastPrice', 'currentPrice', 'yesPrice']:
+                if price_field in market:
+                    try:
+                        price_yes = float(market[price_field])
+                        if 0 < price_yes < 1:
+                            break
+                    except (ValueError, TypeError):
+                        continue
+        
+        # Calculate No price from Yes price if we have it
+        if price_yes is not None and price_no is None:
             price_no = 1.0 - price_yes
+        elif price_no is not None and price_yes is None:
+            price_yes = 1.0 - price_no
+        
+        # Final fallback: if we still don't have prices, return None to skip this market
+        if price_yes is None or price_no is None:
+            # Log warning but don't use default 0.5 - skip this market instead
+            print(f"Warning: Could not extract prices for market {market.get('id', 'unknown')}. Skipping.")
+            return None, None
         
         return price_yes, price_no
     
-    def analyze_market(self, market: dict) -> MarketAnalysis:
+    async def analyze_market(self, market: dict) -> MarketAnalysis:
         """Analyze a market with realistic trading strategies."""
         market_id = market.get('id', '')
         volume = float(market.get('volumeNum', market.get('volume', 0)))
@@ -234,7 +285,15 @@ class TradingBot:
         volume_24h = float(market.get('volume24h', volume))
         
         # Get Yes/No prices
-        price_yes, price_no = self._get_outcome_prices(market)
+        price_yes, price_no = await self._get_outcome_prices(market, self.polymarket_client)
+        
+        # Skip if we couldn't get prices
+        if price_yes is None or price_no is None:
+            # Return default analysis with zero scores
+            analysis.price_yes = 0.5
+            analysis.price_no = 0.5
+            analysis.score = 0
+            return analysis
         
         # Track price history for momentum calculation
         if market_id not in self.price_history:
@@ -494,7 +553,7 @@ class TradingBot:
                         
                         # Include if volume > 200 or liquidity > 500 (very relaxed thresholds)
                         if volume > 200 or liquidity > 500:
-                            analysis = self.analyze_market(market)
+                            analysis = await self.analyze_market(market)
                             self.market_analyses[analysis.market_id] = analysis
                             analyzed_count += 1
                             short_term_analyzed += 1
@@ -566,7 +625,11 @@ class TradingBot:
         for position_key, position in list(self.positions.items()):
             market = next((m for m in markets if m.get('id') == position.market_id), None)
             if market:
-                price_yes, price_no = self._get_outcome_prices(market)
+                price_yes, price_no = await self._get_outcome_prices(market, self.polymarket_client)
+                
+                # Skip if we couldn't get prices
+                if price_yes is None or price_no is None:
+                    continue
                 
                 # Determine current price based on outcome
                 if position.outcome in ['Yes', 'YES', 'yes']:
@@ -630,7 +693,7 @@ class TradingBot:
                             continue
                         
                         # Quick analysis for scalping
-                        analysis = self.analyze_market(market)
+                        analysis = await self.analyze_market(market)
                         
                         # Scalping criteria: High volume score and reasonable signal
                         if analysis.volume_score > 25 and abs(analysis.score) > 20:
@@ -893,7 +956,15 @@ class TradingBot:
         else:
             # Regular directional trade
             outcome = outcome_str
-            price = analysis.price_yes if outcome in ['Yes', 'YES', 'yes'] else analysis.price_no
+            
+            # Get fresh prices from market data (don't rely on analysis which might have stale 0.5 defaults)
+            price_yes, price_no = await self._get_outcome_prices(market, self.polymarket_client)
+            
+            # Skip if we couldn't extract prices
+            if price_yes is None or price_no is None:
+                return
+            
+            price = price_yes if outcome in ['Yes', 'YES', 'yes'] else price_no
             position_key = f"{analysis.market_id}-{outcome}"
             
             # Only filter out invalid prices (exactly 0 or 1, or outside 0-1 range)
@@ -917,9 +988,9 @@ class TradingBot:
             if trade_type == 'scalp':
                 # This shouldn't be called from here, but handle it anyway - flexible sizing
                 base_scalp_size = 1.0
-                volume_multiplier = 0.5 + (min(analysis.volume_score, 50) / 50) * 1.5
+                volume_multiplier = 0.3 + (min(analysis.volume_score, 50) / 50) * 2.0  # Wider range: 0.3x to 2.3x
                 position_size = base_scalp_size * volume_multiplier
-                position_size = max(0.10, min(position_size, self.balance * 0.10))  # Min $0.10, max 10% of balance
+                position_size = max(0.10, min(position_size, self.balance * 0.15))  # Min $0.10, max 15% of balance
             else:
                 # Swing trading: Flexible positions based on context and balance
                 if strategy == 'context_swing':
@@ -953,7 +1024,8 @@ class TradingBot:
             # Cap adjusted size to prevent excessive risk
             max_adjusted_size = self.balance * 0.25 if trade_type == 'swing' else self.balance * 0.15
             adjusted_position_size = min(adjusted_position_size, max_adjusted_size)
-            adjusted_position_size = max(adjusted_position_size, position_size * 0.5)  # Don't reduce below 50% of base
+            # Don't reduce below 30% of base (was 50%, which could cause $0.50 positions)
+            adjusted_position_size = max(adjusted_position_size, position_size * 0.3)
             
             if adjusted_position_size <= self.balance and adjusted_position_size >= 0.10:
                 if trade_type == 'scalp':
@@ -975,7 +1047,12 @@ class TradingBot:
                 continue
             
             # Get current price
-            price_yes, price_no = self._get_outcome_prices(market)
+            price_yes, price_no = await self._get_outcome_prices(market, self.polymarket_client)
+            
+            # Skip if we couldn't get prices
+            if price_yes is None or price_no is None:
+                continue
+            
             current_price = price_yes if position.outcome in ['Yes', 'YES', 'yes'] else price_no
             
             # Calculate P&L

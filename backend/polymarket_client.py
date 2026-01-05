@@ -8,6 +8,12 @@ import json
 import asyncio
 import websockets
 from datetime import datetime
+try:
+    from py_clob_client.client import ClobClient
+    CLOB_AVAILABLE = True
+except ImportError:
+    CLOB_AVAILABLE = False
+    print("Warning: py-clob-client not installed. Price data may be less accurate.")
 
 
 class PolymarketClient:
@@ -16,6 +22,19 @@ class PolymarketClient:
     def __init__(self, api_url: Optional[str] = None):
         self.api_url = api_url or os.getenv("POLYMARKET_API_URL", "https://gamma-api.polymarket.com")
         self.client = httpx.AsyncClient(timeout=30.0)
+        
+        # Initialize CLOB client for accurate price data
+        if CLOB_AVAILABLE:
+            try:
+                self.clob_client = ClobClient(
+                    host="https://clob.polymarket.com",
+                    chain_id=137
+                )
+            except Exception as e:
+                print(f"Warning: Could not initialize CLOB client: {e}")
+                self.clob_client = None
+        else:
+            self.clob_client = None
     
     async def get_markets(self, limit: int = 20, offset: int = 0) -> List[Dict]:
         """Fetch current active markets from Polymarket, using API date filtering."""

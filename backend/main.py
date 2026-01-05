@@ -39,7 +39,10 @@ app = FastAPI(title="Polymarket Insights Chatbot API", lifespan=lifespan)
 allowed_origins = [
     "http://localhost:3000",
     "http://localhost:5173",
+    "https://polyscout.xyz",  # Production frontend domain
+    "http://polyscout.xyz",   # HTTP version (if needed)
 ]
+
 # Add production frontend URL from environment variable if set
 production_frontend = os.getenv("FRONTEND_URL")
 if production_frontend:
@@ -67,12 +70,16 @@ if custom_domain:
     else:
         allowed_origins.append(custom_domain)
 
+# Print allowed origins for debugging (remove in production if needed)
+print(f"CORS allowed origins: {allowed_origins}")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],  # Expose all headers to frontend
 )
 
 

@@ -308,9 +308,8 @@ function TradingDashboard() {
       <div className="pnl-chart-section">
         <h2>P&L Over Time</h2>
         <div className="pnl-chart-container">
-          {pnlHistory.length > 0 ? (
-            <ResponsiveContainer width="100%" height={300}>
-              <LineChart data={pnlHistory}>
+          <ResponsiveContainer width="100%" height={300}>
+            <LineChart data={pnlHistory.length > 0 ? pnlHistory : [{timestamp: new Date().toISOString(), pnl: 0, balance: stats.initialBalance || 2000}]}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#333" />
                 <XAxis 
                   dataKey="timestamp" 
@@ -350,10 +349,7 @@ function TradingDashboard() {
                 />
               </LineChart>
             </ResponsiveContainer>
-          ) : (
-            <div className="empty-state">No P&L history yet</div>
-          )}
-        </div>
+          </div>
       </div>
 
       <div className="dashboard-content">
