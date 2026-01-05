@@ -1924,7 +1924,19 @@ Respond ONLY with valid JSON, no other text."""
         winning_trades = [t for t in completed_trades if t.profit and t.profit > 0]
         losing_trades = [t for t in completed_trades if t.profit and t.profit <= 0]
         
-        total_profit = sum(t.profit for t in completed_trades if t.profit is not None)
+        # Calculate realized P&L (from completed trades)
+        realized_pnl = sum(t.profit for t in completed_trades if t.profit is not None)
+        
+        # Calculate unrealized P&L (from open positions)
+        unrealized_pnl = sum(p.unrealized_pnl for p in self.positions.values())
+        
+        # Total P&L = realized + unrealized
+        total_pnl = realized_pnl + unrealized_pnl
+        
+        # Calculate net worth: initial balance + total P&L
+        # OR: balance + current value of open positions
+        # Both should equal the same thing
+        net_worth = self.initial_balance + total_pnl
         
         # Update P&L history when getting stats
         self._update_pnl_history()
@@ -1932,7 +1944,10 @@ Respond ONLY with valid JSON, no other text."""
         return {
             'balance': round(self.balance, 2),
             'initialBalance': self.initial_balance,
-            'totalProfit': round(total_profit, 2),
+            'totalProfit': round(total_pnl, 2),  # Now includes unrealized P&L
+            'realizedProfit': round(realized_pnl, 2),  # Just completed trades
+            'unrealizedProfit': round(unrealized_pnl, 2),  # Open positions
+            'netWorth': round(net_worth, 2),  # Total portfolio value
             'totalTrades': len(completed_trades),
             'winningTrades': len(winning_trades),
             'losingTrades': len(losing_trades),

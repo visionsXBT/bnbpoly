@@ -48,6 +48,9 @@ interface TradingStats {
   balance: number
   initialBalance: number
   totalProfit: number
+  realizedProfit?: number
+  unrealizedProfit?: number
+  netWorth?: number
   totalTrades: number
   winningTrades: number
   losingTrades: number
@@ -140,6 +143,9 @@ function TradingDashboard() {
             balance: statsResponse.data.balance ?? 2000,
             initialBalance: statsResponse.data.initialBalance ?? 2000,
             totalProfit: statsResponse.data.totalProfit ?? 0,
+            realizedProfit: statsResponse.data.realizedProfit ?? 0,
+            unrealizedProfit: statsResponse.data.unrealizedProfit ?? 0,
+            netWorth: statsResponse.data.netWorth ?? (statsResponse.data.initialBalance ?? 2000),
             totalTrades: statsResponse.data.totalTrades ?? 0,
             winningTrades: statsResponse.data.winningTrades ?? 0,
             losingTrades: statsResponse.data.losingTrades ?? 0,
@@ -344,6 +350,14 @@ function TradingDashboard() {
           <div className="stat-label">Balance</div>
           <div className="stat-value">{formatCurrency(stats.balance)}</div>
         </div>
+        {stats.netWorth !== undefined && (
+          <div className="stat-card">
+            <div className="stat-label">Net Worth</div>
+            <div className={`stat-value ${(stats.netWorth - (stats.initialBalance || 2000)) >= 0 ? 'profit' : 'loss'}`}>
+              {formatCurrency(stats.netWorth)}
+            </div>
+          </div>
+        )}
         <div className="stat-card">
           <div className="stat-label">Total Trades</div>
           <div className="stat-value">{stats.totalTrades}</div>
@@ -359,6 +373,11 @@ function TradingDashboard() {
           <div className={`stat-value ${stats.totalProfit >= 0 ? 'profit' : 'loss'}`}>
             {formatCurrency(stats.totalProfit)}
           </div>
+          {stats.unrealizedProfit !== undefined && stats.unrealizedProfit !== 0 && (
+            <div style={{ fontSize: '11px', color: '#888', marginTop: '4px' }}>
+              ({formatCurrency(stats.realizedProfit ?? 0)} realized, {formatCurrency(stats.unrealizedProfit)} unrealized)
+            </div>
+          )}
         </div>
         <div className="stat-card">
           <div className="stat-label">Active Positions</div>
