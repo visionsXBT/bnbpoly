@@ -410,45 +410,67 @@ class TradingBot:
             score = 80 + min(20, arbitrage_opportunity * 2)  # 80-100 for arbitrage
         else:
             # Volume strategy: Higher volume = more reliable
-            # When volume is 0 (CLOB), still give some score based on other factors
+            # When volume is 0, still give some score based on other factors
             volume_score = volume_factor * 30
             
-            # Momentum strategy: Lower threshold for momentum
-            momentum_score = abs(momentum) * 0.5 if abs(momentum) > 0.5 else 0  # Lowered from 2
+            # Momentum strategy: Give score even with small momentum, or base score if no history
+            if len(self.price_history.get(market_id, [])) >= 2:
+                momentum_score = abs(momentum) * 0.5 if abs(momentum) > 0.5 else 0
+            else:
+                # No price history yet - give base momentum score based on price position
+                # Prices away from 0.5 have more potential
+                momentum_score = abs(price_yes - 0.5) * 20  # Up to 10 points
             
-            # Trend strategy: Lower threshold for trends
-            trend_score = abs(trend) * 2 if abs(trend) > 0.05 else 0  # Lowered from 0.1
+            # Trend strategy: Give score even with small trends, or base score if no history
+            if len(self.price_history.get(market_id, [])) >= 5:
+                trend_score = abs(trend) * 2 if abs(trend) > 0.05 else 0
+            else:
+                # No price history yet - give base trend score
+                trend_score = abs(price_yes - 0.5) * 15  # Up to 7.5 points
             
             # Liquidity strategy: Higher liquidity = better execution
-            # When liquidity is 0 (CLOB), give a default score
+            # Always give at least some liquidity score
             if liquidity > 0:
                 liquidity_score = min(20, liquidity / 1000)
             else:
-                liquidity_score = 5  # Default liquidity score for CLOB markets
+                liquidity_score = 10  # Higher default liquidity score
             
-            # Mean reversion: Expanded price ranges for more opportunities
+            # Mean reversion: Give score based on price position (always give some score)
             mean_reversion_score = 0
             if 0.25 < price_yes < 0.45 or 0.55 < price_yes < 0.75:
-                mean_reversion_score = 8  # Mild reversion opportunity
+                mean_reversion_score = 12  # Mild reversion opportunity
             elif 0.2 < price_yes < 0.3 or 0.7 < price_yes < 0.8:
-                mean_reversion_score = 12  # Moderate reversion opportunity
+                mean_reversion_score = 18  # Moderate reversion opportunity
             elif price_yes < 0.2 or price_yes > 0.8:
-                mean_reversion_score = 18  # Strong reversion opportunity
+                mean_reversion_score = 25  # Strong reversion opportunity
+            else:
+                # Price is around 0.5 - still give some score based on distance from 0.5
+                mean_reversion_score = abs(price_yes - 0.5) * 30  # Up to 15 points
             
-            score = volume_score + momentum_score + trend_score + liquidity_score + mean_reversion_score
+            # Base score: Always give at least 5 points just for having a valid market
+            base_score = 5
+            
+            score = base_score + volume_score + momentum_score + trend_score + liquidity_score + mean_reversion_score
             
             # Calculate separate volume and context scores
             # Volume score: purely based on trading volume and liquidity (for scalping)
-            # When volume is 0, still give some score based on liquidity and other factors
             volume_score_value = (volume_factor * 50) + (liquidity_score * 1.5)
             
             # Context score: based on trend, momentum, sentiment (for swing trading)
-            context_score_value = (momentum_score * 2) + (trend_score * 3) + ((sentiment - 0.5) * 40) + mean_reversion_score
+            context_score_value = (momentum_score * 2) + (trend_score * 3) + ((sentiment - 0.5) * 40) + mean_reversion_score + base_score
             
             # Direction matters: positive score for bullish, negative for bearish
-            if momentum < 0 or trend < 0:
-                score = -score
-                context_score_value = -context_score_value
+            # But only flip if we have actual momentum/trend data
+            if len(self.price_history.get(market_id, [])) >= 2:
+                if momentum < 0 or trend < 0:
+                    score = -score
+                    context_score_value = -context_score_value
+            else:
+                # No history yet - use price position for direction
+                # If price > 0.5, slightly bullish, if < 0.5, slightly bearish
+                if price_yes < 0.5:
+                    score = -score
+                    context_score_value = -context_score_value
         
         return MarketAnalysis(
             market_id=market_id,
@@ -1262,15 +1284,37 @@ class TradingBot:
             # Skip if we couldn't extract prices
             if price_yes is None or price_no is None:
                 print(f"  -> Skipping: Could not extract prices (Yes: {price_yes}, No: {price_no})")
+                print(f"     Market data keys: {list(market.keys())[:10]}")
                 return
             
             price = price_yes if outcome in ['Yes', 'YES', 'yes'] else price_no
             position_key = f"{analysis.market_id}-{outcome}"
             
-            # Only allow prices between $0.10 and $0.99
-            if price < 0.10 or price > 0.99:
-                print(f"  -> Skipping: Price {price:.3f} outside allowed range (0.10-0.99)")
-                return
+            # For catch_all strategy, be more lenient with price range (0.01-0.99)
+            # For other strategies, enforce 0.10-0.99
+            if strategy == 'catch_all':
+                min_price = 0.01
+                max_price = 0.99
+            else:
+                min_price = 0.10
+                max_price = 0.99
+            
+            # Only allow prices in allowed range
+            if price < min_price or price > max_price:
+                print(f"  -> Price {price:.3f} outside allowed range ({min_price}-{max_price})")
+                print(f"     Using analysis prices instead: Yes={analysis.price_yes:.3f}, No={analysis.price_no:.3f}")
+                # FALLBACK: Use analysis prices if fresh prices are out of range
+                if outcome in ['Yes', 'YES', 'yes']:
+                    price = analysis.price_yes
+                else:
+                    price = analysis.price_no
+                
+                # Check again with analysis prices
+                if price < min_price or price > max_price:
+                    print(f"  -> Still skipping: Analysis price {price:.3f} also outside range")
+                    return
+                else:
+                    print(f"  -> Using analysis price {price:.3f} (was outside range, now using fallback)")
             
             # Don't open if position already exists
             if position_key in self.positions:
@@ -1313,8 +1357,16 @@ class TradingBot:
                 print(f"  -> Opening position: {outcome} @ ${price:.3f}, size: ${position_size:.2f} ({position_pct*100:.1f}% of portfolio), balance: ${self.balance:.2f}")
                 await self._open_position(market, analysis, outcome, market_title, price,
                                         position_size, strategy, reason, trade_type)
+                print(f"  -> SUCCESS: Position opened!")
             else:
                 print(f"  -> Skipping: Position size ${position_size:.2f} invalid (balance: ${self.balance:.2f}, min: 0.10, max: {self.balance * 0.02:.2f})")
+                # DEBUG: Try with minimum size if balance allows
+                if self.balance >= 0.10:
+                    min_size = 0.10
+                    print(f"  -> DEBUG: Trying with minimum size ${min_size:.2f}...")
+                    await self._open_position(market, analysis, outcome, market_title, price,
+                                            min_size, strategy, reason + " (min size)", trade_type)
+                    print(f"  -> SUCCESS: Position opened with minimum size!")
     
     async def _check_exit_conditions(self, markets: List[dict]):
         """Check all open positions for exit conditions."""
