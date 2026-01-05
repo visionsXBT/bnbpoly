@@ -26,7 +26,7 @@ const proxyMiddleware = createProxyMiddleware({
     }
   },
   onProxyReq: (proxyReq, req, res) => {
-    console.log(`Proxying ${req.method} ${req.url} to ${BACKEND_URL}${req.url}`);
+    console.log(`[PROXY] ${req.method} ${req.url} -> ${BACKEND_URL}${req.url}`);
     // Add CORS headers to the proxy request
     proxyReq.setHeader('Origin', BACKEND_URL);
   },
@@ -35,26 +35,46 @@ const proxyMiddleware = createProxyMiddleware({
     proxyRes.headers['Access-Control-Allow-Origin'] = '*';
     proxyRes.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS';
     proxyRes.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization';
-    console.log(`Proxy response: ${proxyRes.statusCode} for ${req.url}`);
+    console.log(`[PROXY] Response ${proxyRes.statusCode} for ${req.url}`);
   },
   logLevel: 'info',
 });
 
-// Proxy API requests first
+// IMPORTANT: Proxy API requests FIRST, before static files
 app.use('/api', proxyMiddleware);
 
-// Serve static files from the dist directory
-app.use(express.static(path.join(__dirname, 'dist')));
+// Serve static files from the dist directory (but only if not /api)
+app.use(express.static(path.join(__dirname, 'dist'), {
+  // Don't serve index.html for API routes
+  index: false,
+}));
 
 // Catch-all handler: serve index.html for all non-API routes
 // This must be last to catch all routes not handled above
-app.use((req, res) => {
-  res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+app.use((req, res, next) => {
+  // Skip if already handled (shouldn't happen, but safety check)
+  if (res.headersSent) {
+    return next();
+  }
+  
+  // Don't serve index.html for API routes
+  if (req.path.startsWith('/api')) {
+    return res.status(404).json({ error: 'Not Found' });
+  }
+  
+  // Serve index.html for all other routes (React Router)
+  res.sendFile(path.join(__dirname, 'dist', 'index.html'), (err) => {
+    if (err) {
+      console.error('Error sending index.html:', err);
+      res.status(500).json({ error: 'Internal Server Error' });
+    }
+  });
 });
 
 const server = app.listen(PORT, () => {
   console.log(`Frontend server running on port ${PORT}`);
   console.log(`Proxying /api requests to ${BACKEND_URL}`);
+  console.log(`Static files served from: ${path.join(__dirname, 'dist')}`);
 });
 
 // Handle WebSocket upgrades
