@@ -8,8 +8,7 @@ import './TradingDashboard.css'
 // In production, always use relative URLs so the proxy can handle routing
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || ''
 
-// Debug: Log API base URL
-console.log('TradingDashboard API_BASE_URL:', API_BASE_URL || '(empty - using relative URLs)')
+// API base URL is set (not logged for security)
 
 interface SimulatedTrade {
   id: string
@@ -80,25 +79,20 @@ function TradingDashboard() {
 
   // Debug: Log when component mounts
   useEffect(() => {
-    console.log('TradingDashboard component mounted')
-    console.log('API_BASE_URL:', API_BASE_URL)
+    // Component mounted
   }, [])
 
   // Fetch markets for analysis display
   useEffect(() => {
-    console.log('TradingDashboard: Fetching markets...')
     const fetchMarkets = async () => {
       try {
         const url = `${API_BASE_URL}/api/markets?limit=50`
-        console.log('TradingDashboard: Fetching from URL:', url)
         const response = await axios.get<{markets: any[]}>(url)
-        console.log('TradingDashboard: Markets response:', response.data)
         if (response.data.markets && Array.isArray(response.data.markets)) {
           setMarkets(response.data.markets)
-          console.log('TradingDashboard: Set markets:', response.data.markets.length)
         }
       } catch (error) {
-        console.error('TradingDashboard: Error fetching markets:', error)
+        // Error fetching markets (logged server-side)
         // Don't set error state for markets, just log it
       }
     }
@@ -107,10 +101,8 @@ function TradingDashboard() {
 
   // Fetch trading data from backend
   useEffect(() => {
-    console.log('TradingDashboard: Setting up trading data fetcher...')
     const fetchTradingData = async () => {
       try {
-        console.log('TradingDashboard: Fetching trading data...')
         // Only show error after multiple consecutive failures
         if (errorCount < 3) {
           setError(null)
@@ -118,11 +110,10 @@ function TradingDashboard() {
         
         // Fetch stats
         const statsUrl = `${API_BASE_URL}/api/trading/stats`
-        console.log('TradingDashboard: Fetching stats from:', statsUrl)
         const statsResponse = await axios.get(statsUrl, {
           timeout: 5000 // 5 second timeout
         })
-        console.log('TradingDashboard: Stats response:', statsResponse.data)
+        // Stats fetched
         if (statsResponse.data) {
           // Log debug info from backend
           if (statsResponse.data._debug) {
@@ -158,18 +149,12 @@ function TradingDashboard() {
         }
 
         // Fetch positions
-        console.log('TradingDashboard: Fetching positions from:', `${API_BASE_URL}/api/trading/positions`)
         const positionsResponse = await axios.get(`${API_BASE_URL}/api/trading/positions`)
-        console.log('TradingDashboard: Positions response:', positionsResponse.data)
         const positionsList = Array.isArray(positionsResponse.data?.positions) ? positionsResponse.data.positions : []
-        console.log('TradingDashboard: Setting positions:', positionsList.length)
         setPositions(positionsList)
 
         // Fetch trades
-        console.log('TradingDashboard: Fetching trades from:', `${API_BASE_URL}/api/trading/trades?limit=100`)
         const tradesResponse = await axios.get(`${API_BASE_URL}/api/trading/trades?limit=100`)
-        console.log('TradingDashboard: Trades response:', tradesResponse.data)
-        
         // Log debug info from backend
         if (tradesResponse.data?._debug) {
           console.log('TradingDashboard: Backend Debug Info:', tradesResponse.data._debug)
@@ -194,16 +179,11 @@ function TradingDashboard() {
         }
         
         const tradesList = Array.isArray(tradesResponse.data?.trades) ? tradesResponse.data.trades : []
-        console.log('TradingDashboard: Setting trades:', tradesList.length)
-        if (tradesList.length > 0) {
-          console.log('TradingDashboard: First trade sample:', tradesList[0])
-        }
+        // Trades data processed
         setTrades(tradesList)
 
         // Fetch analyses
-        console.log('TradingDashboard: Fetching analyses from:', `${API_BASE_URL}/api/trading/analyses`)
         const analysesResponse = await axios.get(`${API_BASE_URL}/api/trading/analyses`)
-        console.log('TradingDashboard: Analyses response:', analysesResponse.data)
         const analysesMap = new Map<string, MarketAnalysis>()
         if (Array.isArray(analysesResponse.data?.analyses)) {
           analysesResponse.data.analyses.forEach((a: MarketAnalysis) => {
@@ -212,17 +192,13 @@ function TradingDashboard() {
             }
           })
         }
-        console.log('TradingDashboard: Setting analyses:', analysesMap.size)
         setAnalyses(analysesMap)
         
         // Fetch P&L history
-        console.log('TradingDashboard: Fetching P&L history from:', `${API_BASE_URL}/api/trading/pnl-history?limit=100`)
         const pnlResponse = await axios.get(`${API_BASE_URL}/api/trading/pnl-history?limit=100`, {
           timeout: 5000
         })
-        console.log('TradingDashboard: P&L history response:', pnlResponse.data)
         const pnlList = Array.isArray(pnlResponse.data?.history) ? pnlResponse.data.history : []
-        console.log('TradingDashboard: Setting P&L history:', pnlList.length)
         setPnlHistory(pnlList)
         
         // Success - reset error count and mark as connected
@@ -251,7 +227,7 @@ function TradingDashboard() {
         }
         
         setLoading(false)
-        console.error('Error fetching trading data:', error)
+        // Error fetching trading data (logged server-side)
       }
     }
     
@@ -272,18 +248,16 @@ function TradingDashboard() {
         setErrorCount(0)
       } catch (error) {
         // Silently fail for P&L history to avoid error spam
-        console.error('Error fetching P&L history:', error)
+        // Error fetching P&L history (logged server-side)
       }
     }
 
     // Fetch immediately
-    console.log('TradingDashboard: Starting initial fetch and setting up intervals...')
     fetchTradingData()
 
     // Then fetch every 2 seconds for real-time updates
     // Will automatically slow down if errors persist (handled in fetchTradingData)
     const interval = setInterval(() => {
-      console.log('TradingDashboard: Interval fetch triggered')
       fetchTradingData()
     }, 2000)
     
