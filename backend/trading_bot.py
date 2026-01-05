@@ -1250,6 +1250,24 @@ class TradingBot:
         if len(self.pnl_history) > 200:
             self.pnl_history = self.pnl_history[-200:]
     
+    def get_pnl_history(self, limit: int = 100) -> List[dict]:
+        """Get P&L history for charting."""
+        # Update P&L history before returning
+        self._update_pnl_history()
+        
+        # Convert to list of dicts with timestamp, pnl, balance, and netWorth
+        history = []
+        for timestamp, pnl in self.pnl_history[-limit:]:
+            balance = self.balance
+            net_worth = self.initial_balance + pnl
+            history.append({
+                'timestamp': timestamp.isoformat(),
+                'pnl': round(pnl, 2),
+                'balance': round(balance, 2),
+                'netWorth': round(net_worth, 2)
+            })
+        return history
+    
     def get_stats(self) -> dict:
         """Get trading statistics."""
         completed_trades = [t for t in self.trades if t.profit is not None]
