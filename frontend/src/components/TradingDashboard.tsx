@@ -22,6 +22,7 @@ interface SimulatedTrade {
   size: number
   reason: string
   profit?: number
+  marketImage?: string
 }
 
 interface TradingPosition {
@@ -452,7 +453,20 @@ function TradingDashboard() {
               trades.slice(0, 20).map((trade) => (
                 <div key={trade.id} className={`trade-card ${trade.action.toLowerCase()}`}>
                   <div className="trade-header">
-                    <div className="trade-action">{trade.action}</div>
+                    <div className="trade-header-left">
+                      {trade.marketImage && (
+                        <img 
+                          src={trade.marketImage} 
+                          alt={trade.marketTitle}
+                          className="trade-market-icon"
+                          onError={(e) => {
+                            // Hide image if it fails to load
+                            (e.target as HTMLImageElement).style.display = 'none'
+                          }}
+                        />
+                      )}
+                      <div className="trade-action">{trade.action}</div>
+                    </div>
                     <div className="trade-time">{new Date(trade.timestamp).toLocaleTimeString()}</div>
                   </div>
                   <div className="trade-title">{trade.marketTitle}</div>

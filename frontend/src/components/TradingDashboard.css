@@ -231,6 +231,20 @@
   margin-bottom: 10px;
 }
 
+.trade-header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.trade-market-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  object-fit: cover;
+  border: 1px solid #333;
+}
+
 .trade-action {
   font-size: 14px;
   font-weight: bold;

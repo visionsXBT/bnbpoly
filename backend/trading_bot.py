@@ -1,6 +1,6 @@
 """
 Autonomous trading bot for Polymarket that runs continuously.
-Uses realistic strategies: arbitrage, momentum, volume analysis, and risk management.
+Uses Anthropic Claude AI as the primary decision maker for trade execution.
 """
 import asyncio
 from typing import Dict, List, Optional, Tuple
@@ -8,6 +8,14 @@ from datetime import datetime, timedelta
 from dataclasses import dataclass, field
 import random
 import math
+import os
+import json
+try:
+    import anthropic
+    ANTHROPIC_AVAILABLE = True
+except ImportError:
+    ANTHROPIC_AVAILABLE = False
+    print("Warning: anthropic package not installed. Trading bot will use algorithmic strategies as fallback.")
 
 
 @dataclass
@@ -40,6 +48,7 @@ class SimulatedTrade:
     profit: Optional[float] = None
     strategy: str = ""
     trade_type: str = "swing"  # "scalp" or "swing"
+    market_image: Optional[str] = None  # Market icon/image URL
 
 
 @dataclass
@@ -77,6 +86,21 @@ class TradingBot:
         self._task: Optional[asyncio.Task] = None
         self._position_update_task: Optional[asyncio.Task] = None
         self._scalping_task: Optional[asyncio.Task] = None
+        
+        # Initialize Anthropic Claude client for AI-powered trading decisions
+        self.claude_client = None
+        if ANTHROPIC_AVAILABLE:
+            api_key = os.getenv("ANTHROPIC_API_KEY")
+            if api_key:
+                try:
+                    self.claude_client = anthropic.Anthropic(api_key=api_key)
+                    print("TradingBot: Anthropic Claude initialized - AI will make trading decisions")
+                except Exception as e:
+                    print(f"TradingBot: Failed to initialize Claude: {e}")
+            else:
+                print("TradingBot: ANTHROPIC_API_KEY not set - using algorithmic strategies")
+        else:
+            print("TradingBot: Anthropic package not available - using algorithmic strategies")
         
     def start(self, polymarket_client):
         """Start the trading bot in the background."""
@@ -1057,146 +1081,211 @@ class TradingBot:
                 print(f"Error in scalping loop: {e}")
                 await asyncio.sleep(3)
     
+    async def _get_claude_trading_decision(self, market: dict, analysis: MarketAnalysis) -> Optional[Dict]:
+        """Use Claude AI to analyze market and make trading decision."""
+        if not self.claude_client:
+            return None
+        
+        try:
+            # Prepare market data for Claude
+            market_title = market.get('question') or market.get('title') or market.get('name', 'Unknown')
+            volume = analysis.volume
+            liquidity = analysis.liquidity
+            price_yes = analysis.price_yes
+            price_no = analysis.price_no
+            momentum = analysis.momentum
+            trend = analysis.trend
+            sentiment = analysis.sentiment
+            score = analysis.score
+            
+            # Get price history for context
+            price_history_str = "No price history yet"
+            if market.get('id') in self.price_history:
+                history = self.price_history[market.get('id')]
+                if len(history) > 0:
+                    recent_prices = [f"{p[1]:.3f}" for p in history[-5:]]
+                    price_history_str = ", ".join(recent_prices)
+            
+            # Check if we already have a position
+            has_position_yes = f"{analysis.market_id}-Yes" in self.positions
+            has_position_no = f"{analysis.market_id}-No" in self.positions
+            
+            prompt = f"""You are an expert Polymarket trading bot. Analyze this market and decide whether to trade.
+
+MARKET INFORMATION:
+- Title: {market_title}
+- Market ID: {analysis.market_id}
+- Current Yes Price: ${price_yes:.4f}
+- Current No Price: ${price_no:.4f}
+- Volume (24h): ${volume:,.2f}
+- Liquidity: ${liquidity:,.2f}
+- Momentum: {momentum:.2f}%
+- Trend: {trend:.3f}
+- Sentiment Score: {sentiment:.3f}
+- Technical Score: {score:.2f}
+- Recent Price History: {price_history_str}
+
+CURRENT PORTFOLIO:
+- Balance: ${self.balance:.2f}
+- Active Positions: {len(self.positions)}
+- Already have Yes position: {has_position_yes}
+- Already have No position: {has_position_no}
+
+TRADING CONSTRAINTS:
+- Position size must be 1-2% of portfolio (${self.balance * 0.01:.2f} - ${self.balance * 0.02:.2f})
+- Entry price must be between $0.10 and $0.99
+- Only trade markets resolving in 1-2 weeks
+- Don't open duplicate positions
+
+Analyze this market and provide a trading decision in JSON format:
+{{
+  "should_trade": true/false,
+  "direction": "Yes" or "No" or null,
+  "confidence": 0.0-1.0,
+  "position_size_pct": 0.01-0.02,
+  "reasoning": "Brief explanation of your decision"
+}}
+
+Consider:
+1. Is this a good trading opportunity based on price, volume, and market dynamics?
+2. What direction (Yes/No) has better risk/reward?
+3. What position size is appropriate given the confidence level?
+4. Are there any risks or concerns?
+
+Respond ONLY with valid JSON, no other text."""
+
+            # Claude API is synchronous, so we need to run it in a thread
+            response = await asyncio.to_thread(
+                self.claude_client.messages.create,
+                model="claude-sonnet-4-20250514",
+                max_tokens=500,
+                messages=[{
+                    "role": "user",
+                    "content": prompt
+                }]
+            )
+            
+            # Extract JSON from response
+            response_text = response.content[0].text.strip()
+            
+            # Try to extract JSON if it's wrapped in markdown
+            if "```json" in response_text:
+                response_text = response_text.split("```json")[1].split("```")[0].strip()
+            elif "```" in response_text:
+                response_text = response_text.split("```")[1].split("```")[0].strip()
+            
+            decision = json.loads(response_text)
+            
+            if decision.get("should_trade") and decision.get("direction"):
+                print(f"  Claude Decision: {decision.get('direction')} @ {price_yes if decision.get('direction') == 'Yes' else price_no:.3f}, confidence: {decision.get('confidence', 0):.2f}, size: {decision.get('position_size_pct', 0.01)*100:.1f}%")
+                print(f"  Reasoning: {decision.get('reasoning', 'N/A')}")
+                return decision
+            else:
+                print(f"  Claude Decision: No trade - {decision.get('reasoning', 'N/A')}")
+                return None
+                
+        except json.JSONDecodeError as e:
+            print(f"  Claude response JSON parse error: {e}")
+            print(f"  Response was: {response_text[:200]}")
+            return None
+        except Exception as e:
+            print(f"  Claude decision error: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
     async def _execute_trades(self, markets: List[dict]):
-        """Execute trades based on sophisticated strategies."""
+        """Execute trades based on Claude AI decisions."""
         opportunities = []
         
         # Collect all trading opportunities from analyzed markets
-        # Check all markets that have been analyzed, not just top 50
         analyzed_market_ids = set(self.market_analyses.keys())
         tradeable_markets = [m for m in markets if m.get('id') in analyzed_market_ids]
         
         print(f"_execute_trades: {len(analyzed_market_ids)} analyzed markets, {len(tradeable_markets)} tradeable markets")
         
-        for market in tradeable_markets:
-            market_id = market.get('id')
-            if not market_id:
-                continue
-            
-            # Double-check: Don't trade on unrealistic markets
-            if not self._is_realistic_market(market):
-                continue
-            
-            # CRITICAL: Only trade markets resolving in 1-2 weeks
-            if not self._is_market_in_resolution_window(market):
-                continue  # Skip long-term markets
-            
-            analysis = self.market_analyses.get(market_id)
-            if not analysis:
-                continue
-            
-            market_title = market.get('question') or market.get('title') or market.get('name') or 'Unknown Market'
-            outcomes = market.get('outcomes', ['Yes', 'No'])
-            
-            # Debug: Log analysis scores
-            if len(opportunities) < 3:  # Only log first few to avoid spam
-                print(f"  Market {market_id[:20]}...: score={analysis.score:.1f}, volume={analysis.volume:.0f}, context_score={analysis.context_score:.1f}")
-            
-            # Strategy 1: Arbitrage (highest priority)
-            if analysis.arbitrage_opportunity:
-                opportunities.append({
-                    'market': market,
-                    'analysis': analysis,
-                    'strategy': 'arbitrage',
-                    'priority': 100,
-                    'outcome': 'both',
-                    'expected_profit_pct': analysis.arbitrage_opportunity
-                })
-            
-            # Strategy 2: Momentum trades (very relaxed thresholds)
-            # Score is always positive now
-            elif analysis.score > 10 and (analysis.volume > 500 or analysis.volume == 0):
-                # Use price position for direction since score is always positive
-                direction = 'Yes' if analysis.price_yes > 0.5 else 'No'
-                opportunities.append({
-                    'market': market,
-                    'analysis': analysis,
-                    'strategy': 'momentum',
-            'priority': abs(analysis.score),
-            'outcome': direction,
-            'expected_profit_pct': min(10, abs(analysis.momentum) * 2),
-            'trade_type': 'swing'  # Momentum trades are swing trades
-                })
-            
-            # Strategy 3: Mean reversion (works at any price - looks for markets far from 0.5)
-            # Can trade at high prices (0.98) if expecting reversion, or low prices (0.02)
-            elif ((analysis.price_yes < 0.45 or analysis.price_yes > 0.55) and 
-                  abs(analysis.trend) > 0.2):  # Much more relaxed trend requirement
-                direction = 'Yes' if analysis.price_yes < 0.5 else 'No'
-                # Higher priority if price is more extreme (bigger reversion opportunity)
-                priority_bonus = abs(analysis.price_yes - 0.5) * 50  # Bonus for extreme prices
-                opportunities.append({
-                    'market': market,
-                    'analysis': analysis,
-                    'strategy': 'mean_reversion',
-                    'priority': 30 + priority_bonus,  # Higher priority for extreme prices
-                    'outcome': direction,
-                    'expected_profit_pct': 5,
-                    'trade_type': 'swing'  # Mean reversion are swing trades
-                })
-            
-            # Strategy 4: Volume breakouts (very relaxed)
-            # Allow trades even if volume_24h is 0 (CLOB API doesn't provide volume)
-            elif analysis.score > 8 and (analysis.volume_24h > 2000 or analysis.volume_24h == 0) and abs(analysis.momentum) > 0.5:  # Much more relaxed
-                direction = 'Yes' if analysis.momentum > 0 else 'No'
-                opportunities.append({
-                    'market': market,
-                    'analysis': analysis,
-                    'strategy': 'volume_breakout',
-            'priority': 25,  # Lowered from 35
-            'outcome': direction,
-            'expected_profit_pct': 7,
-            'trade_type': 'swing'  # Volume breakouts can be swings
-                })
-            
-            # Strategy 5: Volume Scalping (high volume, small positions ~$1)
-            # This will be handled separately in the scalping loop for faster execution
-            
-            # Strategy 6: Context Swing Trading (strong context signals, larger positions)
-            elif abs(analysis.context_score) > 10:  # Much more relaxed
-                direction = 'Yes' if analysis.context_score > 0 else 'No'
-                opportunities.append({
-                    'market': market,
-                    'analysis': analysis,
-                    'strategy': 'context_swing',
-                    'priority': abs(analysis.context_score),
-                    'outcome': direction,
-                    'expected_profit_pct': 8,  # Higher profit target for swings
-                    'trade_type': 'swing'
-                })
-            
-            # Strategy 7: General opportunity catch-all (very relaxed)
-            # Allow trades even if volume/liquidity is 0 (CLOB API doesn't provide this)
-            elif analysis.score > 5 and (analysis.volume > 300 or analysis.liquidity > 200 or (analysis.volume == 0 and analysis.liquidity == 0)):  # Much more relaxed
-                direction = 'Yes' if analysis.price_yes > 0.5 else 'No'
-                opportunities.append({
-                    'market': market,
-                    'analysis': analysis,
-                    'strategy': 'general',
-                    'priority': abs(analysis.score),
-                    'outcome': direction,
-                    'expected_profit_pct': 4,
-                    'trade_type': 'swing'  # Default to swing
-                })
-            
-            # Strategy 8: Ultra-permissive catch-all - trade on ANY analyzed market
-            # This should catch ALL markets - score is always positive now
-            # ALWAYS add catch_all if no other strategy matched
-            else:
-                # Use price-based direction
-                direction = 'Yes' if analysis.price_yes > 0.5 else 'No'
-                # Give it a high priority to ensure it executes
-                priority = max(10, analysis.score)  # At least priority 10 to ensure execution
-                opportunities.append({
-                    'market': market,
-                    'analysis': analysis,
-                    'strategy': 'catch_all',
-                    'priority': priority,
-                    'outcome': direction,
-                    'expected_profit_pct': 2,
-                    'trade_type': 'swing'
-                })
-                print(f"    Added catch_all opportunity: score={analysis.score:.2f}, priority={priority}, direction={direction}")
+        # If Claude is available, use AI for decisions
+        if self.claude_client:
+            print("Using Claude AI for trading decisions...")
+            for market in tradeable_markets[:15]:  # Limit to 15 markets per cycle to avoid rate limits
+                market_id = market.get('id')
+                if not market_id:
+                    continue
+                
+                # Filter checks
+                if not self._is_realistic_market(market):
+                    continue
+                
+                if not self._is_market_in_resolution_window(market):
+                    continue
+                
+                analysis = self.market_analyses.get(market_id)
+                if not analysis:
+                    continue
+                
+                # Get Claude's trading decision
+                claude_decision = await self._get_claude_trading_decision(market, analysis)
+                
+                if claude_decision and claude_decision.get("should_trade"):
+                    opportunities.append({
+                        'market': market,
+                        'analysis': analysis,
+                        'strategy': 'claude_ai',
+                        'priority': int(claude_decision.get('confidence', 0.5) * 100),
+                        'outcome': claude_decision.get('direction'),
+                        'position_size_pct': claude_decision.get('position_size_pct', 0.015),
+                        'reasoning': claude_decision.get('reasoning', 'AI decision'),
+                        'trade_type': 'swing',
+                        'claude_decision': claude_decision  # Store full decision
+                    })
+                
+                # Small delay to avoid rate limiting
+                await asyncio.sleep(0.3)
+        else:
+            # Fallback to algorithmic strategies if Claude not available
+            print("Claude not available - using algorithmic strategies as fallback")
+            for market in tradeable_markets:
+                market_id = market.get('id')
+                if not market_id:
+                    continue
+                
+                # Double-check: Don't trade on unrealistic markets
+                if not self._is_realistic_market(market):
+                    continue
+                
+                # CRITICAL: Only trade markets resolving in 1-2 weeks
+                if not self._is_market_in_resolution_window(market):
+                    continue  # Skip long-term markets
+                
+                analysis = self.market_analyses.get(market_id)
+                if not analysis:
+                    continue
+                
+                market_title = market.get('question') or market.get('title') or market.get('name') or 'Unknown Market'
+                
+                # Strategy 1: Arbitrage (highest priority)
+                if analysis.arbitrage_opportunity:
+                    opportunities.append({
+                        'market': market,
+                        'analysis': analysis,
+                        'strategy': 'arbitrage',
+                        'priority': 100,
+                        'outcome': 'both',
+                        'expected_profit_pct': analysis.arbitrage_opportunity
+                    })
+                
+                # Strategy 2: Catch-all for algorithmic fallback
+                elif analysis.score > 5:
+                    direction = 'Yes' if analysis.price_yes > 0.5 else 'No'
+                    opportunities.append({
+                        'market': market,
+                        'analysis': analysis,
+                        'strategy': 'algorithmic_fallback',
+                        'priority': int(analysis.score),
+                        'outcome': direction,
+                        'expected_profit_pct': 2,
+                        'trade_type': 'swing'
+                    })
         
         # Sort by priority and execute top opportunities
         opportunities.sort(key=lambda x: x['priority'], reverse=True)
@@ -1376,25 +1465,32 @@ class TradingBot:
             # Determine trade type from opportunity
             trade_type = opportunity.get('trade_type', 'swing')
             
-            # Position size: Fixed 1-2% of portfolio for all trades
-            # Use 1.5% as base, with slight variation based on strategy confidence
-            base_position_pct = 0.015  # 1.5% base
-            
-            # Slight variation: 1.0% to 2.0% based on score confidence
-            if abs(analysis.score) > 20:
-                position_pct = 0.02  # 2% for high confidence
-            elif abs(analysis.score) > 10:
-                position_pct = 0.015  # 1.5% for medium confidence
+            # Position size: Use Claude's decision if available, otherwise use default logic
+            if opportunity.get('strategy') == 'claude_ai' and opportunity.get('position_size_pct'):
+                # Claude decided the position size
+                position_pct = opportunity.get('position_size_pct')
+                position_pct = max(0.01, min(position_pct, 0.02))  # Ensure 1-2% range
+                position_size = self.balance * position_pct
+                print(f"  -> Using Claude's position size: {position_pct*100:.1f}% = ${position_size:.2f}")
             else:
-                position_pct = 0.01  # 1% for low confidence
-            
-            position_size = self.balance * position_pct
+                # Default algorithmic position sizing
+                base_position_pct = 0.015  # 1.5% base
+                if abs(analysis.score) > 20:
+                    position_pct = 0.02  # 2% for high confidence
+                elif abs(analysis.score) > 10:
+                    position_pct = 0.015  # 1.5% for medium confidence
+                else:
+                    position_pct = 0.01  # 1% for low confidence
+                position_size = self.balance * position_pct
             
             # Ensure minimum of $0.10 and maximum of 2% of balance
             position_size = max(0.10, min(position_size, self.balance * 0.02))
             
             if position_size <= self.balance and position_size >= 0.10:
-                if trade_type == 'scalp':
+                # Use Claude's reasoning if available, otherwise generate default reason
+                if strategy == 'claude_ai' and opportunity.get('reasoning'):
+                    reason = f"Claude AI: {outcome} @ {price:.3f} - {opportunity.get('reasoning')}"
+                elif trade_type == 'scalp':
                     reason = f"Volume Scalp: {outcome} @ {price:.3f} (Vol: {analysis.volume:.0f}, Margin: {max_profit_per_share:.3f})"
                 elif strategy == 'catch_all':
                     reason = f"Catch-All: {outcome} @ {price:.3f} (Score: {analysis.score:.1f}, Vol: {analysis.volume:.0f})"
@@ -1547,6 +1643,9 @@ class TradingBot:
         self.positions[position_key] = position
         self.balance -= size
         
+        # Extract market image/icon from market data
+        market_image = market.get('image') or market.get('icon') or market.get('imageUrl') or None
+        
         trade = SimulatedTrade(
             id=f"trade-{datetime.now().timestamp()}-{random.random()}",
             market_id=analysis.market_id,
@@ -1558,7 +1657,8 @@ class TradingBot:
             size=size,
             reason=reason,
             strategy=strategy,
-            trade_type=trade_type
+            trade_type=trade_type,
+            market_image=market_image
         )
         
         self.trades.insert(0, trade)
@@ -1581,6 +1681,10 @@ class TradingBot:
         # Update P&L history after closing position
         self._update_pnl_history()
         
+        # Try to get market image from market data if available
+        # We don't have market data here, so we'll leave it None (can be enhanced later)
+        market_image = None
+        
         trade = SimulatedTrade(
             id=f"trade-{datetime.now().timestamp()}-{random.random()}",
             market_id=position.market_id,
@@ -1593,7 +1697,8 @@ class TradingBot:
             reason=reason,
             profit=profit,
             strategy=position.strategy,
-            trade_type=position.trade_type
+            trade_type=position.trade_type,
+            market_image=market_image
         )
         
         self.trades.insert(0, trade)
@@ -1702,7 +1807,8 @@ class TradingBot:
                 'reason': t.reason,
                 'profit': round(t.profit, 2) if t.profit is not None else None,
                 'strategy': t.strategy,
-                'tradeType': getattr(t, 'trade_type', 'swing')
+                'tradeType': getattr(t, 'trade_type', 'swing'),
+                'marketImage': getattr(t, 'market_image', None)  # Include market image/icon
             }
             for t in self.trades[:limit]
         ]
