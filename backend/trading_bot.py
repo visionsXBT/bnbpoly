@@ -595,8 +595,8 @@ class TradingBot:
         
         try:
             # Strategy 1: Trending markets (high volume, recent activity) - PRIORITY
-            # Use Gamma API to get volume/liquidity data
-            print("Fetching trending markets by volume from Gamma API (for volume data)...")
+            # Use Gamma API - it has BOTH volume AND prices
+            print("Fetching trending markets from Gamma API...")
             volume_markets = await polymarket_client.get_markets(limit=300, offset=0, use_clob=False)
             
             # Separate markets by resolution window
@@ -621,7 +621,7 @@ class TradingBot:
             # Strategy 2: High liquidity markets - ONLY short-term
             print("Fetching high liquidity short-term markets from Gamma API...")
             try:
-                # Fetch with higher offset to get different markets (use Gamma for volume data)
+                # Fetch with higher offset to get different markets
                 liquidity_markets = await polymarket_client.get_markets(limit=150, offset=100, use_clob=False)
                 short_term_count = 0
                 for market in liquidity_markets:
@@ -690,35 +690,21 @@ class TradingBot:
             short_term_count = sum(1 for m in markets_list if self._is_market_in_resolution_window(m))
             print(f"Total markets after filtering: {len(markets_list)} ({short_term_count} short-term 1-2 weeks)")
             
-            # Enrich markets with CLOB API prices (keep Gamma volume data)
-            print("Enriching markets with CLOB API prices...")
-            # Debug: Log volume data before enrichment
+            # Gamma API already has both volume and prices - no need to enrich
             if markets_list:
                 sample_market = markets_list[0]
                 sample_volume = float(sample_market.get('volumeNum', sample_market.get('volume', 0)))
                 sample_liquidity = float(sample_market.get('liquidityNum', sample_market.get('liquidity', 0)))
-                print(f"  Sample market before enrichment: volume={sample_volume:.0f}, liquidity={sample_liquidity:.0f}")
+                print(f"  Sample market: volume={sample_volume:.0f}, liquidity={sample_liquidity:.0f}")
             
-            enriched_markets = await self._enrich_markets_with_clob_prices(markets_list, polymarket_client)
-            print(f"Enriched {len(enriched_markets)} markets with CLOB prices")
-            
-            # Debug: Log volume data after enrichment
-            if enriched_markets:
-                sample_market = enriched_markets[0]
-                sample_volume = float(sample_market.get('volumeNum', sample_market.get('volume', 0)))
-                sample_liquidity = float(sample_market.get('liquidityNum', sample_market.get('liquidity', 0)))
-                print(f"  Sample market after enrichment: volume={sample_volume:.0f}, liquidity={sample_liquidity:.0f}")
-            
-            return enriched_markets
+            return markets_list
             
         except Exception as e:
             print(f"Error in expanded market fetch: {e}")
             import traceback
             traceback.print_exc()
-            # Fallback to basic fetch (Gamma API for volume)
-            markets = await polymarket_client.get_markets(limit=100, offset=0, use_clob=False)
-            # Enrich with CLOB prices
-            return await self._enrich_markets_with_clob_prices(markets, polymarket_client)
+            # Fallback to basic fetch (Gamma API has everything)
+            return await polymarket_client.get_markets(limit=100, offset=0, use_clob=False)
     
     async def _trading_loop(self, polymarket_client):
         """Main trading loop that runs continuously."""
@@ -735,9 +721,8 @@ class TradingBot:
                     print(f"Performing expanded market search (cycle {cycle_count})...")
                     markets = await self._fetch_markets_expanded(polymarket_client)
                 else:
-                    # In between, just refresh top markets (use Gamma API for volume, then enrich with CLOB)
+                    # In between, just refresh top markets (Gamma API has everything)
                     markets = await polymarket_client.get_markets(limit=200, offset=0, use_clob=False)
-                    markets = await self._enrich_markets_with_clob_prices(markets, polymarket_client)
                 
                 if not markets:
                     print("WARNING: No markets fetched from Polymarket API")
@@ -916,9 +901,8 @@ class TradingBot:
         
         while self.is_running:
             try:
-                # Fetch high-volume markets for scalping (use Gamma API for volume, then enrich with CLOB)
+                # Fetch high-volume markets for scalping (Gamma API has everything)
                 markets = await polymarket_client.get_markets(limit=100, offset=0, use_clob=False)
-                markets = await self._enrich_markets_with_clob_prices(markets, polymarket_client)
                 
                 if not markets:
                     await asyncio.sleep(3)

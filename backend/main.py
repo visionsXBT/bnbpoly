@@ -102,9 +102,23 @@ app.add_middleware(
 )
 
 # Add custom middleware to ALWAYS add CORS headers, even on errors
+# This must be AFTER CORS middleware to ensure headers are always present
 @app.middleware("http")
 async def add_cors_headers(request: Request, call_next):
     """Add CORS headers to ALL responses, including errors."""
+    # Handle OPTIONS preflight requests
+    if request.method == "OPTIONS":
+        response = JSONResponse(
+            content={},
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, PATCH",
+                "Access-Control-Allow-Headers": "*",
+                "Access-Control-Max-Age": "3600",
+            }
+        )
+        return response
+    
     try:
         response = await call_next(request)
     except Exception as e:
@@ -118,6 +132,7 @@ async def add_cors_headers(request: Request, call_next):
                 "Access-Control-Allow-Headers": "*",
             }
         )
+    
     # Always add CORS headers to the response
     response.headers["Access-Control-Allow-Origin"] = "*"
     response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
