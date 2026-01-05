@@ -5,7 +5,8 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsi
 import './TradingDashboard.css'
 
 // Use relative URLs in production (proxy handles routing), or explicit URL if set
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || (import.meta.env.PROD ? '' : '')
+// In production, always use relative URLs so the proxy can handle routing
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || ''
 
 interface SimulatedTrade {
   id: string

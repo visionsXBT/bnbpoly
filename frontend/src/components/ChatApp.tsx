@@ -12,7 +12,8 @@ import type { Message, ChatResponse, Market } from '../types'
 // In production, set VITE_API_BASE_URL in Railway environment variables
 // NOTE: Vite env vars are baked at build time - rebuild frontend after setting this!
 // Use relative URLs in production (proxy handles routing), or explicit URL if set
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || (import.meta.env.PROD ? '' : '')
+// In production, always use relative URLs so the proxy can handle routing
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || ''
 
 // Log API URL for debugging (will show in browser console)
 if (import.meta.env.DEV) {
