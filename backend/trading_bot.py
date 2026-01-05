@@ -328,7 +328,17 @@ class TradingBot:
         
         # Skip if we couldn't get prices
         if price_yes is None or price_no is None:
-            # Return default analysis with zero scores
+            # Still return analysis but with default prices and a base score
+            print(f"  WARNING: Could not extract prices for market {market_id[:20]}, using defaults")
+            # Use default prices but still give a score based on volume/liquidity
+            price_yes = 0.5
+            price_no = 0.5
+            # Calculate a minimal score based on volume/liquidity only
+            volume_factor = min(1.0, volume_24h / 50000) if volume_24h > 0 else 0.3
+            liquidity_score = min(20, liquidity / 1000) if liquidity > 0 else 10
+            base_score = 5
+            minimal_score = base_score + (volume_factor * 30) + liquidity_score
+            
             return MarketAnalysis(
                 market_id=market_id,
                 volume=volume,
@@ -336,15 +346,15 @@ class TradingBot:
                 trend=0.0,
                 momentum=0.0,
                 sentiment=0.5,
-                score=0.0,
+                score=minimal_score,  # Give at least some score
                 arbitrage_opportunity=None,
                 spread=0.0,
-                price_yes=0.5,
-                price_no=0.5,
+                price_yes=price_yes,
+                price_no=price_no,
                 volume_24h=volume_24h,
                 liquidity_depth=liquidity,
-                volume_score=0.0,
-                context_score=0.0
+                volume_score=(volume_factor * 50) + (liquidity_score * 1.5),
+                context_score=minimal_score
             )
         
         # Track price history for momentum calculation
@@ -450,7 +460,8 @@ class TradingBot:
             # Base score: Always give at least 5 points just for having a valid market
             base_score = 5
             
-            score = base_score + volume_score + momentum_score + trend_score + liquidity_score + mean_reversion_score
+            # Calculate raw score (always positive)
+            raw_score = base_score + volume_score + momentum_score + trend_score + liquidity_score + mean_reversion_score
             
             # Calculate separate volume and context scores
             # Volume score: purely based on trading volume and liquidity (for scalping)
@@ -459,18 +470,30 @@ class TradingBot:
             # Context score: based on trend, momentum, sentiment (for swing trading)
             context_score_value = (momentum_score * 2) + (trend_score * 3) + ((sentiment - 0.5) * 40) + mean_reversion_score + base_score
             
-            # Direction matters: positive score for bullish, negative for bearish
-            # But only flip if we have actual momentum/trend data
-            if len(self.price_history.get(market_id, [])) >= 2:
+            # Direction: positive for bullish, negative for bearish
+            # But ALWAYS keep score positive - direction is just for trading decisions
+            score_direction = 1  # 1 for bullish, -1 for bearish
+            
+            price_history_len = len(self.price_history.get(market_id, []))
+            if price_history_len >= 2:
                 if momentum < 0 or trend < 0:
-                    score = -score
-                    context_score_value = -context_score_value
+                    score_direction = -1
             else:
                 # No history yet - use price position for direction
-                # If price > 0.5, slightly bullish, if < 0.5, slightly bearish
+                # If price < 0.5, bearish, if > 0.5, bullish
                 if price_yes < 0.5:
-                    score = -score
-                    context_score_value = -context_score_value
+                    score_direction = -1
+            
+            # IMPORTANT: Keep score always positive for display
+            # The direction is stored separately and used for trading decisions
+            score = raw_score  # Always positive (raw_score is always positive)
+            
+            # Debug: Log score calculation for first few markets
+            if volume > 1000:  # Only log for high-volume markets to avoid spam
+                print(f"    Score calc for {market_id[:20]}: base={base_score}, vol={volume_score:.1f}, mom={momentum_score:.1f}, trend={trend_score:.1f}, liq={liquidity_score:.1f}, mean={mean_reversion_score:.1f}, total={score:.1f}, price_yes={price_yes:.3f}")
+            
+            # For context_score, keep it positive
+            context_score_value = abs(context_score_value)
         
         return MarketAnalysis(
             market_id=market_id,
@@ -1081,9 +1104,10 @@ class TradingBot:
                 })
             
             # Strategy 2: Momentum trades (very relaxed thresholds)
-            # Allow trades even if volume is 0 (CLOB API doesn't provide volume)
-            elif abs(analysis.score) > 10 and (analysis.volume > 500 or analysis.volume == 0):
-                direction = 'Yes' if analysis.score > 0 else 'No'
+            # Score is always positive now
+            elif analysis.score > 10 and (analysis.volume > 500 or analysis.volume == 0):
+                # Use price position for direction since score is always positive
+                direction = 'Yes' if analysis.price_yes > 0.5 else 'No'
                 opportunities.append({
                     'market': market,
                     'analysis': analysis,
@@ -1113,7 +1137,7 @@ class TradingBot:
             
             # Strategy 4: Volume breakouts (very relaxed)
             # Allow trades even if volume_24h is 0 (CLOB API doesn't provide volume)
-            elif abs(analysis.score) > 8 and (analysis.volume_24h > 2000 or analysis.volume_24h == 0) and abs(analysis.momentum) > 0.5:  # Much more relaxed
+            elif analysis.score > 8 and (analysis.volume_24h > 2000 or analysis.volume_24h == 0) and abs(analysis.momentum) > 0.5:  # Much more relaxed
                 direction = 'Yes' if analysis.momentum > 0 else 'No'
                 opportunities.append({
                     'market': market,
@@ -1143,8 +1167,8 @@ class TradingBot:
             
             # Strategy 7: General opportunity catch-all (very relaxed)
             # Allow trades even if volume/liquidity is 0 (CLOB API doesn't provide this)
-            elif abs(analysis.score) > 5 and (analysis.volume > 300 or analysis.liquidity > 200 or (analysis.volume == 0 and analysis.liquidity == 0)):  # Much more relaxed
-                direction = 'Yes' if analysis.score > 0 else 'No'
+            elif analysis.score > 5 and (analysis.volume > 300 or analysis.liquidity > 200 or (analysis.volume == 0 and analysis.liquidity == 0)):  # Much more relaxed
+                direction = 'Yes' if analysis.price_yes > 0.5 else 'No'
                 opportunities.append({
                     'market': market,
                     'analysis': analysis,
@@ -1156,20 +1180,15 @@ class TradingBot:
                 })
             
             # Strategy 8: Ultra-permissive catch-all - trade on ANY analyzed market
-            # This should catch ALL markets, including CLOB markets with 0 volume
-            # Always add catch_all opportunity if no other strategy matched
-            # Use a simple direction based on price (if price_yes > 0.5, buy Yes, else buy No)
+            # This should catch ALL markets - score is always positive now
             else:
-                # If score is exactly 0, use price-based direction
-                if analysis.score == 0:
-                    direction = 'Yes' if analysis.price_yes > 0.5 else 'No'
-                else:
-                    direction = 'Yes' if analysis.score > 0 else 'No'
+                # Use price-based direction
+                direction = 'Yes' if analysis.price_yes > 0.5 else 'No'
                 opportunities.append({
                     'market': market,
                     'analysis': analysis,
                     'strategy': 'catch_all',
-                    'priority': max(1, abs(analysis.score) + 1),  # At least priority 1, higher if score exists
+                    'priority': max(1, analysis.score),  # At least priority 1, use actual score
                     'outcome': direction,
                     'expected_profit_pct': 2,
                     'trade_type': 'swing'
