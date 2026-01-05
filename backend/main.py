@@ -473,10 +473,19 @@ async def get_trading_positions():
 @app.get("/api/trading/trades")
 async def get_trading_trades(limit: int = 100):
     """Get recent trades."""
+    # Debug: Check internal trades list
+    print(f"API: Internal trades list length: {len(trading_bot.trades)}")
+    if len(trading_bot.trades) > 0:
+        print(f"API: First internal trade: {trading_bot.trades[0]}")
+        print(f"API: First internal trade type: {type(trading_bot.trades[0])}")
+        print(f"API: First internal trade fields: {dir(trading_bot.trades[0])}")
+    
     trades = trading_bot.get_recent_trades(limit=limit)
-    print(f"API: Returning {len(trades)} trades")
+    print(f"API: get_recent_trades returned {len(trades)} trades")
     if len(trades) > 0:
         print(f"API: First trade sample: {trades[0]}")
+    else:
+        print(f"API: WARNING - No trades returned! Internal list has {len(trading_bot.trades)} trades")
     return {"trades": trades}
 
 

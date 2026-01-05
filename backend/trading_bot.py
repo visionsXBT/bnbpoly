@@ -1293,13 +1293,23 @@ Respond ONLY with valid JSON, no other text."""
         # Collect all trading opportunities from analyzed markets
         # Handle both CLOB (condition_id) and Gamma (id) formats
         analyzed_market_ids = set(self.market_analyses.keys())
+        print(f"_execute_trades: Analyzed market IDs: {list(analyzed_market_ids)[:5]}...")
+        
         tradeable_markets = []
         for m in markets:
             market_id = m.get('id') or m.get('condition_id') or m.get('question_id')
             if market_id and market_id in analyzed_market_ids:
                 tradeable_markets.append(m)
+            elif market_id:
+                # Debug: Check why market is not in analyzed set
+                if len(tradeable_markets) < 3:
+                    print(f"  Market {market_id[:20]}... not in analyzed set (has {market_id})")
         
         print(f"_execute_trades: {len(analyzed_market_ids)} analyzed markets, {len(tradeable_markets)} tradeable markets")
+        if len(tradeable_markets) == 0 and len(markets) > 0:
+            print(f"  WARNING: No tradeable markets found! Sample market IDs from fetched markets:")
+            for m in markets[:3]:
+                print(f"    - id: {m.get('id')}, condition_id: {m.get('condition_id')}, question_id: {m.get('question_id')}")
         
         # If Claude is available, use AI for decisions
         if self.claude_client:
@@ -1771,8 +1781,11 @@ Respond ONLY with valid JSON, no other text."""
         )
         
         self.trades.insert(0, trade)
-        print(f"  -> Trade created: {trade.action} {trade.outcome} @ ${trade.price:.3f}, size: ${trade.size:.2f}")
-        print(f"  -> Total trades now: {len(self.trades)}")
+        print(f"  -> ✓✓✓ TRADE CREATED (BUY): {trade.action} {trade.outcome} @ ${trade.price:.3f}, size: ${trade.size:.2f}")
+        print(f"  -> Trade ID: {trade.id}, Market: {trade.market_title[:50]}")
+        print(f"  -> Total trades in list: {len(self.trades)}")
+        print(f"  -> Trade object type: {type(trade)}")
+        print(f"  -> Trade has id: {hasattr(trade, 'id')}, has market_id: {hasattr(trade, 'market_id')}")
     
     async def _close_position(self, position: TradingPosition, current_price: float, 
                              market_title: str, reason: str):
@@ -1813,8 +1826,10 @@ Respond ONLY with valid JSON, no other text."""
         )
         
         self.trades.insert(0, trade)
-        print(f"  -> Trade created: {trade.action} {trade.outcome} @ ${trade.price:.3f}, size: ${trade.size:.2f}")
-        print(f"  -> Total trades now: {len(self.trades)}")
+        print(f"  -> ✓✓✓ TRADE CREATED (SELL): {trade.action} {trade.outcome} @ ${trade.price:.3f}, size: ${trade.size:.2f}, profit: ${profit:.2f}")
+        print(f"  -> Trade ID: {trade.id}, Market: {trade.market_title[:50]}")
+        print(f"  -> Total trades in list: {len(self.trades)}")
+        print(f"  -> Trade object type: {type(trade)}")
         del self.positions[position_key]
     
     def _update_pnl_history(self):
@@ -1907,24 +1922,39 @@ Respond ONLY with valid JSON, no other text."""
     
     def get_recent_trades(self, limit: int = 100) -> List[dict]:
         """Get recent trades as dictionaries."""
-        return [
-            {
-                'id': t.id,
-                'marketId': t.market_id,
-                'marketTitle': t.market_title,
-                'timestamp': t.timestamp.isoformat(),
-                'action': t.action,
-                'outcome': t.outcome,
-                'price': round(t.price, 4),
-                'size': round(t.size, 2),
-                'reason': t.reason,
-                'profit': round(t.profit, 2) if t.profit is not None else None,
-                'strategy': t.strategy,
-                'tradeType': getattr(t, 'trade_type', 'swing'),
-                'marketImage': getattr(t, 'market_image', None)  # Include market image/icon
-            }
-            for t in self.trades[:limit]
-        ]
+        print(f"get_recent_trades: Internal trades list has {len(self.trades)} trades")
+        if len(self.trades) > 0:
+            print(f"get_recent_trades: First trade type: {type(self.trades[0])}")
+            print(f"get_recent_trades: First trade id: {self.trades[0].id if hasattr(self.trades[0], 'id') else 'NO ID'}")
+        
+        trades_list = []
+        for t in self.trades[:limit]:
+            try:
+                trade_dict = {
+                    'id': t.id,
+                    'marketId': t.market_id,
+                    'marketTitle': t.market_title,
+                    'timestamp': t.timestamp.isoformat(),
+                    'action': t.action,
+                    'outcome': t.outcome,
+                    'price': round(t.price, 4),
+                    'size': round(t.size, 2),
+                    'reason': t.reason,
+                    'profit': round(t.profit, 2) if t.profit is not None else None,
+                    'strategy': t.strategy,
+                    'tradeType': getattr(t, 'trade_type', 'swing'),
+                    'marketImage': getattr(t, 'market_image', None)  # Include market image/icon
+                }
+                trades_list.append(trade_dict)
+            except Exception as e:
+                print(f"Error converting trade to dict: {e}")
+                print(f"Trade object: {t}")
+                import traceback
+                traceback.print_exc()
+                continue
+        
+        print(f"get_recent_trades: Returning {len(trades_list)} formatted trades")
+        return trades_list
     
     def get_market_analyses(self) -> List[dict]:
         """Get market analyses as dictionaries."""
