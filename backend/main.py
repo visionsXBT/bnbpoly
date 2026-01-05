@@ -30,9 +30,15 @@ from contextlib import asynccontextmanager
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
+    print("=" * 50)
+    print("Starting trading bot...")
+    print("=" * 50)
     trading_bot.start(polymarket_client)
+    print(f"Trading bot started. Is running: {trading_bot.is_running}")
+    print("=" * 50)
     yield
     # Shutdown
+    print("Stopping trading bot...")
     trading_bot.stop()
     await polymarket_client.close()
 
@@ -436,31 +442,41 @@ async def stream_price_updates(websocket: WebSocket):
 @app.get("/api/trading/stats")
 async def get_trading_stats():
     """Get trading bot statistics."""
-    return trading_bot.get_stats()
+    stats = trading_bot.get_stats()
+    print(f"API: Returning stats: {stats}")
+    return stats
 
 
 @app.get("/api/trading/positions")
 async def get_trading_positions():
     """Get all open trading positions."""
-    return {"positions": trading_bot.get_positions()}
+    positions = trading_bot.get_positions()
+    print(f"API: Returning {len(positions)} positions")
+    return {"positions": positions}
 
 
 @app.get("/api/trading/trades")
 async def get_trading_trades(limit: int = 100):
     """Get recent trades."""
-    return {"trades": trading_bot.get_recent_trades(limit=limit)}
+    trades = trading_bot.get_recent_trades(limit=limit)
+    print(f"API: Returning {len(trades)} trades")
+    return {"trades": trades}
 
 
 @app.get("/api/trading/analyses")
 async def get_market_analyses():
     """Get market analyses."""
-    return {"analyses": trading_bot.get_market_analyses()}
+    analyses = trading_bot.get_market_analyses()
+    print(f"API: Returning {len(analyses)} market analyses")
+    return {"analyses": analyses}
 
 
 @app.get("/api/trading/pnl-history")
 async def get_pnl_history(limit: int = 100):
     """Get P&L history for charting."""
-    return {"history": trading_bot.get_pnl_history(limit=limit)}
+    history = trading_bot.get_pnl_history(limit=limit)
+    print(f"API: Returning {len(history)} P&L history entries")
+    return {"history": history}
 
 
 if __name__ == "__main__":

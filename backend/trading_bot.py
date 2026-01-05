@@ -81,6 +81,7 @@ class TradingBot:
     def start(self, polymarket_client):
         """Start the trading bot in the background."""
         if self._task is None or self._task.done():
+            print("TradingBot: Starting trading loops...")
             self.is_running = True
             self.polymarket_client = polymarket_client  # Store client reference for price fetching
             self._task = asyncio.create_task(self._trading_loop(polymarket_client))
@@ -88,6 +89,7 @@ class TradingBot:
             self._position_update_task = asyncio.create_task(self._position_update_loop(polymarket_client))
             # Start separate scalping loop for high-frequency volume trades
             self._scalping_task = asyncio.create_task(self._scalping_loop(polymarket_client))
+            print("TradingBot: All trading loops started successfully")
     
     def stop(self):
         """Stop the trading bot."""

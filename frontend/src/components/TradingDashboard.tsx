@@ -77,6 +77,12 @@ function TradingDashboard() {
   const [backendConnected, setBackendConnected] = useState(false)
   const [errorCount, setErrorCount] = useState(0)
 
+  // Debug: Log when component mounts
+  useEffect(() => {
+    console.log('TradingDashboard component mounted')
+    console.log('API_BASE_URL:', API_BASE_URL)
+  }, [])
+
   // Fetch markets for analysis display
   useEffect(() => {
     console.log('TradingDashboard: Fetching markets...')
@@ -209,11 +215,15 @@ function TradingDashboard() {
     }
 
     // Fetch immediately
+    console.log('TradingDashboard: Starting initial fetch and setting up intervals...')
     fetchTradingData()
 
     // Then fetch every 2 seconds for real-time updates
     // Will automatically slow down if errors persist (handled in fetchTradingData)
-    const interval = setInterval(fetchTradingData, 2000)
+    const interval = setInterval(() => {
+      console.log('TradingDashboard: Interval fetch triggered')
+      fetchTradingData()
+    }, 2000)
     
     // Fetch P&L history every 5 seconds (less frequent)
     const pnlInterval = setInterval(fetchPnlHistory, 5000)
