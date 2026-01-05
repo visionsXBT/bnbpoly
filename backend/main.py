@@ -475,6 +475,8 @@ async def get_trading_trades(limit: int = 100):
     """Get recent trades."""
     trades = trading_bot.get_recent_trades(limit=limit)
     print(f"API: Returning {len(trades)} trades")
+    if len(trades) > 0:
+        print(f"API: First trade sample: {trades[0]}")
     return {"trades": trades}
 
 

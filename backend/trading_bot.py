@@ -1206,7 +1206,8 @@ Respond ONLY with valid JSON, no other text."""
         
         # If Claude is available, use AI for decisions
         if self.claude_client:
-            print("Using Claude AI for trading decisions...")
+            print(f"Using Claude AI for trading decisions... ({len(tradeable_markets)} tradeable markets)")
+            claude_opportunities = 0
             for market in tradeable_markets[:15]:  # Limit to 15 markets per cycle to avoid rate limits
                 market_id = market.get('id')
                 if not market_id:
@@ -1227,6 +1228,7 @@ Respond ONLY with valid JSON, no other text."""
                 claude_decision = await self._get_claude_trading_decision(market, analysis)
                 
                 if claude_decision and claude_decision.get("should_trade"):
+                    claude_opportunities += 1
                     opportunities.append({
                         'market': market,
                         'analysis': analysis,
@@ -1241,6 +1243,8 @@ Respond ONLY with valid JSON, no other text."""
                 
                 # Small delay to avoid rate limiting
                 await asyncio.sleep(0.3)
+            
+            print(f"Claude AI found {claude_opportunities} trading opportunities out of {len(tradeable_markets[:15])} markets analyzed")
         else:
             # Fallback to algorithmic strategies if Claude not available
             print("Claude not available - using algorithmic strategies as fallback")
@@ -1308,7 +1312,7 @@ Respond ONLY with valid JSON, no other text."""
         swing_opportunities = [opp for opp in opportunities if opp.get('trade_type') == 'swing']
         
         print(f"Executing {min(len(swing_opportunities), 6)} swing trades from {len(swing_opportunities)} opportunities")
-        print(f"Current balance: ${self.balance:.2f}, Active positions: {len(self.positions)}")
+        print(f"Current balance: ${self.balance:.2f}, Active positions: {len(self.positions)}, Total trades in history: {len(self.trades)}")
         
         # Execute swing trades (larger, context-based positions)
         max_swings_per_cycle = 6  # Focus on swing trades in main loop
@@ -1662,6 +1666,8 @@ Respond ONLY with valid JSON, no other text."""
         )
         
         self.trades.insert(0, trade)
+        print(f"  -> Trade created: {trade.action} {trade.outcome} @ ${trade.price:.3f}, size: ${trade.size:.2f}")
+        print(f"  -> Total trades now: {len(self.trades)}")
     
     async def _close_position(self, position: TradingPosition, current_price: float, 
                              market_title: str, reason: str):
@@ -1702,6 +1708,8 @@ Respond ONLY with valid JSON, no other text."""
         )
         
         self.trades.insert(0, trade)
+        print(f"  -> Trade created: {trade.action} {trade.outcome} @ ${trade.price:.3f}, size: ${trade.size:.2f}")
+        print(f"  -> Total trades now: {len(self.trades)}")
         del self.positions[position_key]
     
     def _update_pnl_history(self):

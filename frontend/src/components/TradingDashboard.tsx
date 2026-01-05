@@ -150,6 +150,9 @@ function TradingDashboard() {
         console.log('TradingDashboard: Trades response:', tradesResponse.data)
         const tradesList = Array.isArray(tradesResponse.data?.trades) ? tradesResponse.data.trades : []
         console.log('TradingDashboard: Setting trades:', tradesList.length)
+        if (tradesList.length > 0) {
+          console.log('TradingDashboard: First trade sample:', tradesList[0])
+        }
         setTrades(tradesList)
 
         // Fetch analyses
@@ -483,7 +486,7 @@ function TradingDashboard() {
                       <span className="detail-label">Size:</span>
                       <span className="detail-value">{formatCurrency(trade.size)}</span>
                     </div>
-                    {trade.profit !== undefined && (
+                    {trade.profit !== undefined && trade.profit !== null && (
                       <div className="trade-detail">
                         <span className="detail-label">P&L:</span>
                         <span className={`detail-value ${trade.profit >= 0 ? 'profit' : 'loss'}`}>
@@ -502,7 +505,12 @@ function TradingDashboard() {
                 </div>
               ))
             ) : (
-              <div className="empty-state">No trades yet</div>
+              <div className="empty-state">
+                No trades yet. Waiting for Claude AI to execute trades...
+                <div style={{fontSize: '12px', marginTop: '8px', opacity: 0.7}}>
+                  Trades will appear here once the bot starts trading.
+                </div>
+              </div>
             )}
           </div>
         </div>
