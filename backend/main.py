@@ -24,6 +24,11 @@ polymarket_client = PolymarketClient()
 insight_generator = InsightGenerator()
 trading_bot = get_trading_bot()
 
+# Verify trading bot instance
+print(f"Trading bot instance created: {id(trading_bot)}")
+print(f"Trading bot is_running: {trading_bot.is_running}")
+print(f"Trading bot initial balance: ${trading_bot.balance}")
+
 # Use lifespan context for cleanup (replaces deprecated on_event)
 from contextlib import asynccontextmanager
 
@@ -32,9 +37,13 @@ async def lifespan(app: FastAPI):
     # Startup
     print("=" * 50)
     print("Starting trading bot...")
+    print(f"Trading bot instance ID: {id(trading_bot)}")
+    print(f"Trading bot instance before start: is_running={trading_bot.is_running}, trades={len(trading_bot.trades)}")
     print("=" * 50)
     trading_bot.start(polymarket_client)
     print(f"Trading bot started. Is running: {trading_bot.is_running}")
+    print(f"Trading bot has {len(trading_bot.trades)} trades after start")
+    print(f"Trading bot task: {trading_bot._task}")
     print("=" * 50)
     yield
     # Shutdown
@@ -457,6 +466,9 @@ async def stream_price_updates(websocket: WebSocket):
 @app.get("/api/trading/stats")
 async def get_trading_stats():
     """Get trading bot statistics."""
+    bot_instance_id = id(trading_bot)
+    print(f"API /stats: Trading bot instance ID: {bot_instance_id}")
+    print(f"API /stats: Bot has {len(trading_bot.trades)} trades, {len(trading_bot.positions)} positions")
     stats = trading_bot.get_stats()
     print(f"API: Returning stats: {stats}")
     return stats
@@ -473,12 +485,21 @@ async def get_trading_positions():
 @app.get("/api/trading/trades")
 async def get_trading_trades(limit: int = 100):
     """Get recent trades."""
+    # Verify we're accessing the same instance
+    bot_instance_id = id(trading_bot)
+    print(f"API /trades: Trading bot instance ID: {bot_instance_id}")
+    print(f"API /trades: Bot is_running: {trading_bot.is_running}")
+    print(f"API /trades: Bot has {len(trading_bot.trades)} trades in internal list")
+    print(f"API /trades: Bot has {len(trading_bot.positions)} positions")
+    print(f"API /trades: Bot balance: ${trading_bot.balance}")
+    
     # Debug: Check internal trades list
-    print(f"API: Internal trades list length: {len(trading_bot.trades)}")
     if len(trading_bot.trades) > 0:
         print(f"API: First internal trade: {trading_bot.trades[0]}")
         print(f"API: First internal trade type: {type(trading_bot.trades[0])}")
-        print(f"API: First internal trade fields: {dir(trading_bot.trades[0])}")
+        print(f"API: First internal trade has id: {hasattr(trading_bot.trades[0], 'id')}")
+        if hasattr(trading_bot.trades[0], 'id'):
+            print(f"API: First internal trade id: {trading_bot.trades[0].id}")
     
     trades = trading_bot.get_recent_trades(limit=limit)
     print(f"API: get_recent_trades returned {len(trades)} trades")
@@ -486,6 +507,8 @@ async def get_trading_trades(limit: int = 100):
         print(f"API: First trade sample: {trades[0]}")
     else:
         print(f"API: WARNING - No trades returned! Internal list has {len(trading_bot.trades)} trades")
+        if len(trading_bot.trades) > 0:
+            print(f"API: ERROR - Trades exist but get_recent_trades returned empty list!")
     return {"trades": trades}
 
 
@@ -507,5 +530,8 @@ async def get_pnl_history(limit: int = 100):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    # Read PORT from environment variable (Railway/Heroku set this), default to 8080
+    port = int(os.getenv("PORT", 8080))
+    print(f"Starting server on port {port}")
+    uvicorn.run(app, host="0.0.0.0", port=port)
 

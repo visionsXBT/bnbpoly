@@ -196,7 +196,7 @@ function TradingDashboard() {
             if (error.code === 'ECONNABORTED') {
               setError('Backend request timeout. Make sure the backend is running.')
             } else if (error.message === 'Network Error' || error.code === 'ERR_NETWORK') {
-              setError('Cannot connect to backend. Make sure the backend server is running on port 8000.')
+              setError('Cannot connect to backend. Make sure the backend server is running on port 8080.')
             } else {
               setError(`Error connecting to backend: ${error.message}`)
             }
@@ -299,7 +299,7 @@ function TradingDashboard() {
           <p style={{ fontSize: '14px', color: '#888', marginTop: '10px' }}>
             {API_BASE_URL 
               ? `Trying to connect to: ${API_BASE_URL}`
-              : 'Using relative URLs (make sure backend is running on port 8000)'}
+              : 'Using relative URLs (make sure backend is running on port 8080)'}
           </p>
           <p style={{ fontSize: '12px', color: '#666', marginTop: '5px' }}>
             Check that the backend server is running and accessible.

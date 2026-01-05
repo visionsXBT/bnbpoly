@@ -40,28 +40,6 @@
   font-weight: 600;
 }
 
-.header-nav {
-  display: flex;
-  align-items: center;
-  gap: 15px;
-}
-
-.nav-button {
-  padding: 8px 16px;
-  background-color: transparent;
-  color: #00FF00;
-  border: 1px solid #00FF00;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 14px;
-  transition: all 0.3s;
-}
-
-.nav-button:hover {
-  background-color: #00FF00;
-  color: #000000;
-}
-
 .trending-sidebar {
   width: 280px;
   background: #000000;
@@ -156,8 +134,6 @@
   padding: 20px;
   margin-top: 20px;
   justify-content: right;
-  position: relative;
-  z-index: 1;
 }
 
 .chat-container {
