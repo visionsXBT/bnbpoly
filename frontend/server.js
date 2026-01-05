@@ -10,9 +10,6 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const BACKEND_URL = process.env.BACKEND_URL || 'https://bnbpoly-production.up.railway.app';
 
-// Serve static files from the dist directory
-app.use(express.static(path.join(__dirname, 'dist')));
-
 // Proxy all /api requests to the backend (including WebSocket upgrades)
 const proxyMiddleware = createProxyMiddleware({
   target: BACKEND_URL,
@@ -43,10 +40,15 @@ const proxyMiddleware = createProxyMiddleware({
   logLevel: 'info',
 });
 
+// Proxy API requests first
 app.use('/api', proxyMiddleware);
 
-// Handle all other routes - serve the React app
-app.get('*', (req, res) => {
+// Serve static files from the dist directory
+app.use(express.static(path.join(__dirname, 'dist')));
+
+// Catch-all handler: serve index.html for all non-API routes
+// This must be last to catch all routes not handled above
+app.use((req, res) => {
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 
@@ -55,5 +57,7 @@ const server = app.listen(PORT, () => {
   console.log(`Proxying /api requests to ${BACKEND_URL}`);
 });
 
-// Handle WebSocket upgrades (http-proxy-middleware handles this, but we need to attach to server)
-server.on('upgrade', proxyMiddleware.upgrade);
+// Handle WebSocket upgrades
+if (proxyMiddleware.upgrade) {
+  server.on('upgrade', proxyMiddleware.upgrade);
+}
