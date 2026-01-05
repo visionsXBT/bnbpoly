@@ -693,15 +693,15 @@ class TradingBot:
                         volume = float(market.get('volumeNum', market.get('volume', 0)))
                         liquidity = float(market.get('liquidityNum', market.get('liquidity', 0)))
                         
-                        # Scalping requires HIGH volume (minimum $10k) for liquidity
-                        if volume < 10000 or liquidity < 5000:
+                        # Scalping requires reasonable volume (relaxed)
+                        if volume < 500 or liquidity < 300:
                             continue
                         
                         # Quick analysis for scalping
                         analysis = await self.analyze_market(market)
                         
-                        # Scalping criteria: High volume score and reasonable signal
-                        if analysis.volume_score > 25 and abs(analysis.score) > 20:
+                        # Scalping criteria: Much more relaxed thresholds
+                        if analysis.volume_score > 10 and abs(analysis.score) > 5:
                             market_title = market.get('question') or market.get('title') or market.get('name') or 'Unknown'
                             
                             # Check if we already have a position
@@ -820,8 +820,8 @@ class TradingBot:
                     'expected_profit_pct': analysis.arbitrage_opportunity
                 })
             
-            # Strategy 2: Momentum trades (relaxed thresholds)
-            elif abs(analysis.score) > 25 and analysis.volume > 2000:  # Lowered from 50/10000
+            # Strategy 2: Momentum trades (very relaxed thresholds)
+            elif abs(analysis.score) > 10 and analysis.volume > 500:  # Much more relaxed
                 direction = 'Yes' if analysis.score > 0 else 'No'
                 opportunities.append({
                     'market': market,
@@ -836,7 +836,7 @@ class TradingBot:
             # Strategy 3: Mean reversion (works at any price - looks for markets far from 0.5)
             # Can trade at high prices (0.98) if expecting reversion, or low prices (0.02)
             elif ((analysis.price_yes < 0.45 or analysis.price_yes > 0.55) and 
-                  abs(analysis.trend) > 0.5):  # Price away from 0.5 and showing trend
+                  abs(analysis.trend) > 0.2):  # Much more relaxed trend requirement
                 direction = 'Yes' if analysis.price_yes < 0.5 else 'No'
                 # Higher priority if price is more extreme (bigger reversion opportunity)
                 priority_bonus = abs(analysis.price_yes - 0.5) * 50  # Bonus for extreme prices
@@ -850,8 +850,8 @@ class TradingBot:
                     'trade_type': 'swing'  # Mean reversion are swing trades
                 })
             
-            # Strategy 4: Volume breakouts (relaxed)
-            elif abs(analysis.score) > 20 and analysis.volume_24h > 10000 and abs(analysis.momentum) > 1.5:  # Lowered thresholds
+            # Strategy 4: Volume breakouts (very relaxed)
+            elif abs(analysis.score) > 8 and analysis.volume_24h > 2000 and abs(analysis.momentum) > 0.5:  # Much more relaxed
                 direction = 'Yes' if analysis.momentum > 0 else 'No'
                 opportunities.append({
                     'market': market,
@@ -867,7 +867,7 @@ class TradingBot:
             # This will be handled separately in the scalping loop for faster execution
             
             # Strategy 6: Context Swing Trading (strong context signals, larger positions)
-            elif abs(analysis.context_score) > 25:  # Strong context signal
+            elif abs(analysis.context_score) > 10:  # Much more relaxed
                 direction = 'Yes' if analysis.context_score > 0 else 'No'
                 opportunities.append({
                     'market': market,
@@ -880,7 +880,7 @@ class TradingBot:
                 })
             
             # Strategy 7: General opportunity catch-all (very relaxed)
-            elif abs(analysis.score) > 15 and (analysis.volume > 1000 or analysis.liquidity > 500):
+            elif abs(analysis.score) > 5 and (analysis.volume > 300 or analysis.liquidity > 200):  # Much more relaxed
                 direction = 'Yes' if analysis.score > 0 else 'No'
                 opportunities.append({
                     'market': market,
