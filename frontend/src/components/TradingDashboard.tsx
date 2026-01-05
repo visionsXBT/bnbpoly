@@ -68,7 +68,7 @@ function TradingDashboard() {
   const [markets, setMarkets] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [pnlHistory, setPnlHistory] = useState<Array<{timestamp: string, pnl: number, balance: number}>>([])
+  const [pnlHistory, setPnlHistory] = useState<Array<{timestamp: string, pnl: number, balance: number, netWorth: number}>>([])
   const [backendConnected, setBackendConnected] = useState(false)
   const [errorCount, setErrorCount] = useState(0)
 
@@ -306,10 +306,10 @@ function TradingDashboard() {
       </div>
 
       <div className="pnl-chart-section">
-        <h2>P&L Over Time</h2>
+        <h2>Portfolio Net Worth</h2>
         <div className="pnl-chart-container">
           <ResponsiveContainer width="100%" height={300}>
-            <LineChart data={pnlHistory.length > 0 ? pnlHistory : [{timestamp: new Date().toISOString(), pnl: 0, balance: stats.initialBalance || 2000}]}>
+            <LineChart data={pnlHistory.length > 0 ? pnlHistory : [{timestamp: new Date().toISOString(), pnl: 0, balance: stats.initialBalance || 2000, netWorth: stats.initialBalance || 2000}]}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#333" />
                 <XAxis 
                   dataKey="timestamp" 
@@ -324,6 +324,7 @@ function TradingDashboard() {
                   stroke="#888"
                   tick={{ fill: '#888', fontSize: 12 }}
                   tickFormatter={(value) => `$${value.toFixed(0)}`}
+                  domain={['dataMin - 50', 'dataMax + 50']}  // Add padding for better visualization
                 />
                 <Tooltip 
                   contentStyle={{ 
@@ -336,16 +337,21 @@ function TradingDashboard() {
                     const date = new Date(value)
                     return date.toLocaleString()
                   }}
-                  formatter={(value: any) => [formatCurrency(value), 'P&L']}
+                  formatter={(value: any, name?: string) => {
+                    if (name === 'netWorth') {
+                      return [formatCurrency(value), 'Net Worth']
+                    }
+                    return [formatCurrency(value), name || 'Value']
+                  }}
                 />
                 <Legend wrapperStyle={{ color: '#888' }} />
                 <Line 
                   type="monotone" 
-                  dataKey="pnl" 
+                  dataKey="netWorth" 
                   stroke="#00FF00" 
                   strokeWidth={2}
                   dot={false}
-                  name="P&L"
+                  name="Net Worth"
                 />
               </LineChart>
             </ResponsiveContainer>

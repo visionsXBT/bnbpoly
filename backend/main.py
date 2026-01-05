@@ -41,7 +41,12 @@ allowed_origins = [
     "http://localhost:5173",
     "https://polyscout.xyz",  # Production frontend domain
     "http://polyscout.xyz",   # HTTP version (if needed)
+    "https://www.polyscout.xyz",  # www subdomain
+    "http://www.polyscout.xyz",   # www subdomain HTTP
 ]
+
+# Note: We'll use explicit origins + regex pattern instead of wildcard
+# This is more secure and works better with FastAPI CORS middleware
 
 # Add production frontend URL from environment variable if set
 production_frontend = os.getenv("FRONTEND_URL")
@@ -70,12 +75,15 @@ if custom_domain:
     else:
         allowed_origins.append(custom_domain)
 
-# Print allowed origins for debugging (remove in production if needed)
+# Print allowed origins for debugging
 print(f"CORS allowed origins: {allowed_origins}")
 
+# Add CORS middleware with regex pattern for polyscout.xyz subdomains
+# This allows https://polyscout.xyz and any subdomain like https://www.polyscout.xyz
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
+    allow_origin_regex=r"https?://(.*\.)?polyscout\.xyz",  # Allow polyscout.xyz and any subdomain
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
