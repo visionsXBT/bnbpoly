@@ -569,6 +569,8 @@ class TradingBot:
                                                 market['yesPrice'] = price_float
                                             elif outcome.upper() in ['NO', 'NO ']:
                                                 market['noPrice'] = price_float
+                                    except (ValueError, TypeError):
+                                        continue
                         
                         # RESTORE volume/liquidity fields to ensure they're preserved
                         market['volumeNum'] = preserved_volume
