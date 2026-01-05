@@ -124,6 +124,27 @@ function TradingDashboard() {
         })
         console.log('TradingDashboard: Stats response:', statsResponse.data)
         if (statsResponse.data) {
+          // Log debug info from backend
+          if (statsResponse.data._debug) {
+            console.log('TradingDashboard: Stats Debug Info:', statsResponse.data._debug)
+            console.log(`  - Bot is running: ${statsResponse.data._debug.bot_is_running}`)
+            console.log(`  - Internal trades count: ${statsResponse.data._debug.internal_trades_count}`)
+            console.log(`  - Has Claude client: ${statsResponse.data._debug.has_claude_client}`)
+            console.log(`  - Has CLOB client: ${statsResponse.data._debug.has_clob_client}`)
+            console.log(`  - CLOB initialized: ${statsResponse.data._debug.clob_initialized}`)
+            console.log(`  - Market analyses: ${statsResponse.data._debug.market_analyses_count}`)
+            
+            if (!statsResponse.data._debug.bot_is_running) {
+              console.error('ERROR: Trading bot is not running! Check backend logs.')
+            }
+            if (!statsResponse.data._debug.has_claude_client) {
+              console.warn('WARNING: Claude client not initialized. Set ANTHROPIC_API_KEY environment variable.')
+            }
+            if (!statsResponse.data._debug.clob_initialized && !statsResponse.data._debug.has_clob_client) {
+              console.warn('WARNING: CLOB client not initialized. Install py-clob-client.')
+            }
+          }
+          
           setStats({
             balance: statsResponse.data.balance ?? 2000,
             initialBalance: statsResponse.data.initialBalance ?? 2000,
@@ -148,6 +169,30 @@ function TradingDashboard() {
         console.log('TradingDashboard: Fetching trades from:', `${API_BASE_URL}/api/trading/trades?limit=100`)
         const tradesResponse = await axios.get(`${API_BASE_URL}/api/trading/trades?limit=100`)
         console.log('TradingDashboard: Trades response:', tradesResponse.data)
+        
+        // Log debug info from backend
+        if (tradesResponse.data?._debug) {
+          console.log('TradingDashboard: Backend Debug Info:', tradesResponse.data._debug)
+          console.log(`  - Bot is running: ${tradesResponse.data._debug.bot_is_running}`)
+          console.log(`  - Internal trades count: ${tradesResponse.data._debug.internal_trades_count}`)
+          console.log(`  - Returned trades count: ${tradesResponse.data._debug.returned_trades_count}`)
+          console.log(`  - Has Claude client: ${tradesResponse.data._debug.has_claude_client}`)
+          console.log(`  - Has CLOB client: ${tradesResponse.data._debug.has_clob_client}`)
+          console.log(`  - Market analyses: ${tradesResponse.data._debug.market_analyses_count}`)
+          console.log(`  - Positions: ${tradesResponse.data._debug.positions_count}`)
+          console.log(`  - Balance: $${tradesResponse.data._debug.balance}`)
+          
+          if (tradesResponse.data._debug.internal_trades_count > 0 && tradesResponse.data._debug.returned_trades_count === 0) {
+            console.error('ERROR: Backend has trades but get_recent_trades returned empty!')
+          }
+          if (!tradesResponse.data._debug.bot_is_running) {
+            console.error('ERROR: Trading bot is not running!')
+          }
+          if (!tradesResponse.data._debug.has_claude_client) {
+            console.warn('WARNING: Claude client not initialized - trading decisions will use algorithmic fallback')
+          }
+        }
+        
         const tradesList = Array.isArray(tradesResponse.data?.trades) ? tradesResponse.data.trades : []
         console.log('TradingDashboard: Setting trades:', tradesList.length)
         if (tradesList.length > 0) {

@@ -471,6 +471,17 @@ async def get_trading_stats():
     print(f"API /stats: Bot has {len(trading_bot.trades)} trades, {len(trading_bot.positions)} positions")
     stats = trading_bot.get_stats()
     print(f"API: Returning stats: {stats}")
+    
+    # Add debug info to stats response
+    stats["_debug"] = {
+        "bot_instance_id": str(bot_instance_id),
+        "bot_is_running": trading_bot.is_running,
+        "internal_trades_count": len(trading_bot.trades),
+        "has_claude_client": trading_bot.claude_client is not None,
+        "has_clob_client": trading_bot.clob_client is not None,
+        "clob_initialized": trading_bot._clob_initialized if hasattr(trading_bot, '_clob_initialized') else False,
+        "market_analyses_count": len(trading_bot.market_analyses)
+    }
     return stats
 
 
@@ -509,7 +520,22 @@ async def get_trading_trades(limit: int = 100):
         print(f"API: WARNING - No trades returned! Internal list has {len(trading_bot.trades)} trades")
         if len(trading_bot.trades) > 0:
             print(f"API: ERROR - Trades exist but get_recent_trades returned empty list!")
-    return {"trades": trades}
+    
+    # Include debug info in response so frontend can see it
+    return {
+        "trades": trades,
+        "_debug": {
+            "bot_instance_id": str(bot_instance_id),
+            "bot_is_running": trading_bot.is_running,
+            "internal_trades_count": len(trading_bot.trades),
+            "positions_count": len(trading_bot.positions),
+            "balance": trading_bot.balance,
+            "returned_trades_count": len(trades),
+            "has_claude_client": trading_bot.claude_client is not None,
+            "has_clob_client": trading_bot.clob_client is not None,
+            "market_analyses_count": len(trading_bot.market_analyses)
+        }
+    }
 
 
 @app.get("/api/trading/analyses")

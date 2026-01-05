@@ -156,16 +156,18 @@ class TradingBot:
             self._scalping_task.cancel()
     
     def _is_market_in_resolution_window(self, market: dict) -> bool:
-        """Check if market resolves in 1-2 weeks (7-14 days)."""
+        """Check if market resolves in 1-4 weeks (7-28 days)."""
         try:
-            # Try different possible field names for end date
+            # Try different possible field names for end date (including CLOB format)
             end_date_str = (
+                market.get('end_date_iso') or  # CLOB format
                 market.get('endDate') or 
                 market.get('end_date') or 
                 market.get('resolutionDate') or
                 market.get('resolution_date') or
                 market.get('endsAt') or
-                market.get('ends_at')
+                market.get('ends_at') or
+                market.get('endDateISO8601')
             )
             
             if not end_date_str:
@@ -201,8 +203,9 @@ class TradingBot:
             now = datetime.now(end_date.tzinfo) if end_date.tzinfo else datetime.now()
             days_until_resolution = (end_date - now).days
             
-            # Only include markets resolving in 7-14 days (1-2 weeks)
-            return 7 <= days_until_resolution <= 14
+            # Only include markets resolving in 7-28 days (1-4 weeks) - expanded range
+            # This is more flexible and allows more trading opportunities
+            return 7 <= days_until_resolution <= 28
             
         except Exception as e:
             print(f"Error checking market resolution date: {e}")
@@ -287,15 +290,44 @@ class TradingBot:
             condition_id = market.get('condition_id') or market.get('conditionId')
             if condition_id:
                 try:
-                    clob_market = await polymarket_client.clob_client.get_market(condition_id)
-                    if clob_market and clob_market.get('tokens'):
-                        for token in clob_market['tokens']:
-                            if token.get('outcome') == 'Yes' or token.get('outcome') == 'YES':
-                                price_yes = float(token.get('price', 0))
-                            elif token.get('outcome') == 'No' or token.get('outcome') == 'NO':
-                                price_no = float(token.get('price', 0))
+                    # Check if get_market is async or sync
+                    import inspect
+                    clob_client = polymarket_client.clob_client
+                    get_market_method = getattr(clob_client, 'get_market', None)
+                    if get_market_method:
+                        if inspect.iscoroutinefunction(get_market_method):
+                            clob_market = await get_market_method(condition_id)
+                        else:
+                            # Sync method - run in thread
+                            clob_market = await asyncio.to_thread(get_market_method, condition_id)
+                        
+                        # Handle different response formats
+                        if clob_market:
+                            tokens = None
+                            if isinstance(clob_market, dict):
+                                tokens = clob_market.get('tokens') or clob_market.get('data', {}).get('tokens')
+                            elif hasattr(clob_market, 'tokens'):
+                                tokens = clob_market.tokens
+                            
+                            if tokens:
+                                for token in tokens:
+                                    if isinstance(token, dict):
+                                        outcome = str(token.get('outcome', '')).strip().upper()
+                                        price = token.get('price')
+                                        if price is not None:
+                                            try:
+                                                price_float = float(price)
+                                                if 0 < price_float < 1:
+                                                    if outcome in ['YES', 'YES ']:
+                                                        price_yes = price_float
+                                                    elif outcome in ['NO', 'NO ']:
+                                                        price_no = price_float
+                                            except (ValueError, TypeError):
+                                                continue
                 except Exception as e:
                     print(f"Warning: CLOB API price fetch failed for market {market_id}: {e}")
+                    import traceback
+                    traceback.print_exc()
         
         # 3. Fallback to outcomes array (Gamma API format)
         outcomes = market.get('outcomes', [])
@@ -875,20 +907,26 @@ class TradingBot:
                         if not resolution_ok:
                             # Check if market resolves in 2-4 weeks as fallback
                             try:
-                                end_date_str = market.get('endDate') or market.get('end_date') or market.get('endDateISO8601')
+                                end_date_str = market.get('end_date_iso') or market.get('endDate') or market.get('end_date') or market.get('endDateISO8601')
                                 if end_date_str:
-                                    if 'T' in end_date_str or end_date_str.endswith('Z'):
-                                        end_date = datetime.fromisoformat(end_date_str.replace('Z', '+00:00'))
+                                    # Reject markets clearly in 2026+ (over a year away)
+                                    end_date_str_lower = str(end_date_str).lower()
+                                    if '2026' in end_date_str_lower or '2027' in end_date_str_lower or '2028' in end_date_str_lower:
+                                        resolution_ok = False
                                     else:
-                                        end_date = datetime.strptime(end_date_str.split('T')[0], '%Y-%m-%d')
-                                    now = datetime.now(end_date.tzinfo) if end_date.tzinfo else datetime.now()
-                                    days_until_resolution = (end_date - now).days
-                                    if 14 <= days_until_resolution <= 28:  # 2-4 weeks
-                                        resolution_ok = True
-                                        print(f"  Allowing 2-4 week market: {days_until_resolution} days")
+                                        if 'T' in str(end_date_str) or str(end_date_str).endswith('Z'):
+                                            end_date = datetime.fromisoformat(str(end_date_str).replace('Z', '+00:00'))
+                                        else:
+                                            end_date = datetime.strptime(str(end_date_str).split('T')[0], '%Y-%m-%d')
+                                        now = datetime.now(end_date.tzinfo) if end_date.tzinfo else datetime.now()
+                                        days_until_resolution = (end_date - now).days
+                                        if 7 <= days_until_resolution <= 28:  # 1-4 weeks
+                                            resolution_ok = True
+                                        elif days_until_resolution > 365:  # Over a year
+                                            resolution_ok = False
                             except Exception as e:
-                                # On error parsing date, allow the market
-                                resolution_ok = True
+                                # On error, be conservative and skip
+                                resolution_ok = False
                         
                         if not resolution_ok:
                             continue  # Skip long-term markets
