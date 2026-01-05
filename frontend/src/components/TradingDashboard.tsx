@@ -69,6 +69,8 @@ function TradingDashboard() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [pnlHistory, setPnlHistory] = useState<Array<{timestamp: string, pnl: number, balance: number}>>([])
+  const [backendConnected, setBackendConnected] = useState(false)
+  const [errorCount, setErrorCount] = useState(0)
 
   // Fetch markets for analysis display
   useEffect(() => {
@@ -90,10 +92,15 @@ function TradingDashboard() {
   useEffect(() => {
     const fetchTradingData = async () => {
       try {
-        setError(null)
+        // Only show error after multiple consecutive failures
+        if (errorCount < 3) {
+          setError(null)
+        }
         
         // Fetch stats
-        const statsResponse = await axios.get(`${API_BASE_URL}/api/trading/stats`)
+        const statsResponse = await axios.get(`${API_BASE_URL}/api/trading/stats`, {
+          timeout: 5000 // 5 second timeout
+        })
         if (statsResponse.data) {
           setStats({
             balance: statsResponse.data.balance ?? 2000,
@@ -128,28 +135,60 @@ function TradingDashboard() {
         setAnalyses(analysesMap)
         
         // Fetch P&L history
-        const pnlResponse = await axios.get(`${API_BASE_URL}/api/trading/pnl-history?limit=100`)
+        const pnlResponse = await axios.get(`${API_BASE_URL}/api/trading/pnl-history?limit=100`, {
+          timeout: 5000
+        })
         if (Array.isArray(pnlResponse.data?.history)) {
           setPnlHistory(pnlResponse.data.history)
         }
         
+        // Success - reset error count and mark as connected
+        setBackendConnected(true)
+        setErrorCount(0)
+        setError(null)
         setLoading(false)
       } catch (error) {
-        console.error('Error fetching trading data:', error)
-        setError(axios.isAxiosError(error) 
-          ? `Error connecting to backend: ${error.message}` 
-          : 'Error fetching trading data')
+        const newErrorCount = errorCount + 1
+        setErrorCount(newErrorCount)
+        setBackendConnected(false)
+        
+        // Only show error after 3 consecutive failures to avoid spam
+        if (newErrorCount >= 3) {
+          if (axios.isAxiosError(error)) {
+            if (error.code === 'ECONNABORTED') {
+              setError('Backend request timeout. Make sure the backend is running.')
+            } else if (error.message === 'Network Error' || error.code === 'ERR_NETWORK') {
+              setError('Cannot connect to backend. Make sure the backend server is running on port 8000.')
+            } else {
+              setError(`Error connecting to backend: ${error.message}`)
+            }
+          } else {
+            setError('Error fetching trading data')
+          }
+        }
+        
         setLoading(false)
+        console.error('Error fetching trading data:', error)
       }
     }
     
     const fetchPnlHistory = async () => {
+      // Skip if backend is not connected to avoid spam
+      if (!backendConnected && errorCount >= 3) {
+        return
+      }
+      
       try {
-        const pnlResponse = await axios.get(`${API_BASE_URL}/api/trading/pnl-history?limit=100`)
+        const pnlResponse = await axios.get(`${API_BASE_URL}/api/trading/pnl-history?limit=100`, {
+          timeout: 5000
+        })
         if (Array.isArray(pnlResponse.data?.history)) {
           setPnlHistory(pnlResponse.data.history)
         }
+        setBackendConnected(true)
+        setErrorCount(0)
       } catch (error) {
+        // Silently fail for P&L history to avoid error spam
         console.error('Error fetching P&L history:', error)
       }
     }
@@ -158,6 +197,7 @@ function TradingDashboard() {
     fetchTradingData()
 
     // Then fetch every 2 seconds for real-time updates
+    // Will automatically slow down if errors persist (handled in fetchTradingData)
     const interval = setInterval(fetchTradingData, 2000)
     
     // Fetch P&L history every 5 seconds (less frequent)
@@ -167,7 +207,7 @@ function TradingDashboard() {
       clearInterval(interval)
       clearInterval(pnlInterval)
     }
-  }, [])
+  }, []) // Empty deps - fetch functions use current state values via closure
 
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('en-US', {
@@ -215,7 +255,12 @@ function TradingDashboard() {
         <div className="error-state">
           <p>⚠️ {error}</p>
           <p style={{ fontSize: '14px', color: '#888', marginTop: '10px' }}>
-            Make sure the backend is running and the trading bot has started.
+            {API_BASE_URL 
+              ? `Trying to connect to: ${API_BASE_URL}`
+              : 'Using relative URLs (make sure backend is running on port 8000)'}
+          </p>
+          <p style={{ fontSize: '12px', color: '#666', marginTop: '5px' }}>
+            Check that the backend server is running and accessible.
           </p>
         </div>
       </div>
