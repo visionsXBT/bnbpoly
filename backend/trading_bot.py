@@ -528,9 +528,11 @@ class TradingBot:
                     markets = await polymarket_client.get_markets(limit=200, offset=0)
                 
                 if not markets:
+                    print("WARNING: No markets fetched from Polymarket API")
                     await asyncio.sleep(10)
                     continue
                 
+                print(f"Fetched {len(markets)} markets from Polymarket")
                 print(f"Analyzing {len(markets)} markets for trading opportunities...")
                 
                 # Analyze all fetched markets, prioritizing short-term trending markets
@@ -566,8 +568,8 @@ class TradingBot:
                         continue
                 
                 print(f"Analyzed {short_term_analyzed} short-term markets (1-2 week resolution)")
-                
-                print(f"Analyzed {analyzed_count} markets")
+                print(f"Total analyzed: {analyzed_count} markets")
+                print(f"Current balance: ${self.balance:.2f}, Active positions: {len(self.positions)}")
                 
                 # Update existing positions (check all markets for position updates)
                 await self._update_positions(markets, polymarket_client)
@@ -890,8 +892,12 @@ class TradingBot:
         # Sort by priority and execute top opportunities
         opportunities.sort(key=lambda x: x['priority'], reverse=True)
         
+        print(f"Found {len(opportunities)} trading opportunities")
+        
         # Filter out scalping opportunities (handled separately in scalping loop)
         swing_opportunities = [opp for opp in opportunities if opp.get('trade_type') == 'swing']
+        
+        print(f"Executing {min(len(swing_opportunities), 6)} swing trades from {len(swing_opportunities)} opportunities")
         
         # Execute swing trades (larger, context-based positions)
         max_swings_per_cycle = 6  # Focus on swing trades in main loop
@@ -900,8 +906,14 @@ class TradingBot:
         for opp in swing_opportunities[:max_swings_per_cycle]:
             if trades_executed >= max_swings_per_cycle:
                 break
-            await self._execute_opportunity(opp)
-            trades_executed += 1
+            try:
+                await self._execute_opportunity(opp)
+                trades_executed += 1
+                print(f"Executed trade: {opp['strategy']} on {opp['market'].get('question', 'Unknown')[:50]}")
+            except Exception as e:
+                print(f"Error executing opportunity: {e}")
+                import traceback
+                traceback.print_exc()
         
         # Note: Scalping trades are handled separately in _scalping_loop()
         
