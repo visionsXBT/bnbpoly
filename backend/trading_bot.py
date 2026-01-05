@@ -577,6 +577,7 @@ class TradingBot:
                 await self._update_positions(markets, polymarket_client)
                 
                 # Find trading opportunities from analyzed markets
+                print(f"Executing trades on {len(self.market_analyses)} analyzed markets...")
                 await self._execute_trades(markets)
                 
                 # Cleanup: Remove old analyses for markets we're no longer tracking
@@ -895,6 +896,8 @@ class TradingBot:
         opportunities.sort(key=lambda x: x['priority'], reverse=True)
         
         print(f"Found {len(opportunities)} trading opportunities")
+        if opportunities:
+            print(f"Top opportunity: {opportunities[0]['strategy']} on {opportunities[0]['market'].get('question', 'Unknown')[:60]}")
         
         # Filter out scalping opportunities (handled separately in scalping loop)
         swing_opportunities = [opp for opp in opportunities if opp.get('trade_type') == 'swing']
@@ -929,6 +932,8 @@ class TradingBot:
         strategy = opportunity['strategy']
         outcome_str = opportunity['outcome']
         market_title = market.get('question') or market.get('title') or market.get('name') or 'Unknown Market'
+        
+        print(f"Executing opportunity: {strategy} on {market_title[:60]}, outcome: {outcome_str}")
         
         # Arbitrage: Buy both outcomes
         if strategy == 'arbitrage' and outcome_str == 'both':
@@ -976,6 +981,7 @@ class TradingBot:
             
             # Skip if we couldn't extract prices
             if price_yes is None or price_no is None:
+                print(f"  -> Skipping: Could not extract prices (Yes: {price_yes}, No: {price_no})")
                 return
             
             price = price_yes if outcome in ['Yes', 'YES', 'yes'] else price_no
@@ -983,15 +989,18 @@ class TradingBot:
             
             # Only filter out invalid prices (exactly 0 or 1, or outside 0-1 range)
             if price <= 0 or price >= 1.0:
+                print(f"  -> Skipping: Invalid price {price}")
                 return
             
             # Don't open if position already exists
             if position_key in self.positions:
+                print(f"  -> Skipping: Position already exists")
                 return
             
             # Calculate remaining profit margin
             max_profit_per_share = 1.0 - price if outcome in ['Yes', 'YES', 'yes'] else price
             if max_profit_per_share <= 0:
+                print(f"  -> Skipping: No profit potential (margin: {max_profit_per_share})")
                 return  # No profit potential
             
             # Determine trade type from opportunity
@@ -1046,8 +1055,11 @@ class TradingBot:
                     reason = f"Volume Scalp: {outcome} @ {price:.3f} (Vol: {analysis.volume:.0f}, Margin: {max_profit_per_share:.3f})"
                 else:
                     reason = f"{strategy.title()}: {outcome} @ {price:.3f} (Vol: {analysis.volume:.0f}, Margin: {max_profit_per_share:.3f})"
+                print(f"  -> Opening position: {outcome} @ ${price:.3f}, size: ${adjusted_position_size:.2f}")
                 await self._open_position(market, analysis, outcome, market_title, price,
                                         adjusted_position_size, strategy, reason, trade_type)
+            else:
+                print(f"  -> Skipping: Position size ${adjusted_position_size:.2f} invalid (balance: ${self.balance:.2f})")
     
     async def _check_exit_conditions(self, markets: List[dict]):
         """Check all open positions for exit conditions."""
