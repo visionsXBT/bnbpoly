@@ -319,6 +319,10 @@ class TradingBot:
         liquidity = float(market.get('liquidityNum', market.get('liquidity', 0)))
         volume_24h = float(market.get('volume24h', volume))
         
+        # Debug: Log volume data to see if it's being preserved
+        if volume > 0 or liquidity > 0:
+            print(f"  Analyzing market {market_id[:20]}...: volume={volume:.0f}, liquidity={liquidity:.0f}, volume_24h={volume_24h:.0f}")
+        
         # Get Yes/No prices
         price_yes, price_no = await self._get_outcome_prices(market, self.polymarket_client)
         
@@ -464,15 +468,136 @@ class TradingBot:
             context_score=context_score_value
         )
     
+    async def _enrich_markets_with_clob_prices(self, markets: List[dict], polymarket_client) -> List[dict]:
+        """Enrich Gamma API markets with accurate prices from CLOB API.
+        Keeps Gamma volume/liquidity data but uses CLOB for accurate prices."""
+        if not polymarket_client or not hasattr(polymarket_client, 'clob_client') or not polymarket_client.clob_client:
+            # No CLOB client available, return markets as-is
+            return markets
+        
+        enriched_markets = []
+        enriched_count = 0
+        
+        # Process markets in batches to avoid overwhelming the API
+        batch_size = 20
+        for i in range(0, len(markets), batch_size):
+            batch = markets[i:i + batch_size]
+            
+            # Process batch concurrently
+            tasks = []
+            for market in batch:
+                tasks.append(self._enrich_single_market(market, polymarket_client))
+            
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            for market, result in zip(batch, results):
+                if isinstance(result, Exception):
+                    # If enrichment failed, keep original market with Gamma prices
+                    print(f"Warning: Could not enrich market {market.get('id')} with CLOB prices: {result}")
+                    enriched_markets.append(market)
+                else:
+                    enriched_markets.append(result)
+                    if result.get('_clob_enriched'):
+                        enriched_count += 1
+            
+            # Small delay between batches to avoid rate limiting
+            if i + batch_size < len(markets):
+                await asyncio.sleep(0.5)
+        
+        print(f"Enriched {enriched_count}/{len(markets)} markets with CLOB prices")
+        return enriched_markets
+    
+    async def _enrich_single_market(self, market: dict, polymarket_client) -> dict:
+        """Enrich a single market with CLOB API prices."""
+        condition_id = market.get('condition_id') or market.get('conditionId')
+        market_id = market.get('id')
+        
+        # Try to get condition_id from market ID if not present
+        if not condition_id and market_id:
+            # Some Gamma API markets use market_id as condition_id
+            condition_id = market_id
+        
+        # If we have condition_id, fetch prices from CLOB
+        if condition_id and polymarket_client.clob_client:
+            try:
+                clob_market = await polymarket_client.clob_client.get_market(condition_id)
+                if clob_market:
+                    # Handle different CLOB response formats
+                    tokens = None
+                    if isinstance(clob_market, dict):
+                        tokens = clob_market.get('tokens') or clob_market.get('data', {}).get('tokens')
+                    elif hasattr(clob_market, 'tokens'):
+                        tokens = clob_market.tokens
+                    
+                    if tokens:
+                        # Update market with CLOB prices while EXPLICITLY preserving Gamma volume data
+                        market = market.copy()  # Don't modify original
+                        
+                        # EXPLICITLY preserve volume/liquidity fields from Gamma API
+                        preserved_volume = market.get('volumeNum', market.get('volume', 0))
+                        preserved_liquidity = market.get('liquidityNum', market.get('liquidity', 0))
+                        preserved_volume_24h = market.get('volume24h', preserved_volume)
+                        
+                        # Update tokens array (don't overwrite, append if needed)
+                        if 'tokens' not in market:
+                            market['tokens'] = []
+                        else:
+                            # Keep existing tokens if any, but we'll add CLOB tokens
+                            market['tokens'] = market.get('tokens', [])
+                        
+                        for token in tokens:
+                            if isinstance(token, dict):
+                                outcome = token.get('outcome', '')
+                                price = token.get('price')
+                                
+                                if price is not None:
+                                    try:
+                                        price_float = float(price)
+                                        if 0 < price_float < 1:
+                                            # Check if token already exists
+                                            existing_token = next((t for t in market['tokens'] if isinstance(t, dict) and t.get('outcome', '').upper() == outcome.upper()), None)
+                                            if not existing_token:
+                                                market['tokens'].append({
+                                                    'outcome': outcome,
+                                                    'price': price_float
+                                                })
+                                            
+                                            # Update direct price fields for compatibility
+                                            if outcome.upper() in ['YES', 'YES ']:
+                                                market['newestPrice'] = price_float
+                                                market['price'] = price_float
+                                                market['yesPrice'] = price_float
+                                            elif outcome.upper() in ['NO', 'NO ']:
+                                                market['noPrice'] = price_float
+                        
+                        # RESTORE volume/liquidity fields to ensure they're preserved
+                        market['volumeNum'] = preserved_volume
+                        market['volume'] = preserved_volume
+                        market['liquidityNum'] = preserved_liquidity
+                        market['liquidity'] = preserved_liquidity
+                        market['volume24h'] = preserved_volume_24h
+                        
+                        market['_clob_enriched'] = True
+                        return market
+            except Exception as e:
+                # If CLOB fetch fails, keep Gamma prices
+                pass
+        
+        # If enrichment failed, return original market (with volume data intact)
+        market['_clob_enriched'] = False
+        return market
+    
     async def _fetch_markets_expanded(self, polymarket_client) -> List[dict]:
-        """Fetch markets using multiple strategies, prioritizing trending and short-term markets."""
+        """Fetch markets using multiple strategies, prioritizing trending and short-term markets.
+        Uses Gamma API for volume data, then enriches with CLOB API for accurate prices."""
         all_markets = {}
         market_ids_seen = set()
         
         try:
             # Strategy 1: Trending markets (high volume, recent activity) - PRIORITY
-            print("Fetching trending markets by volume (prioritized)...")
-            volume_markets = await polymarket_client.get_markets(limit=300, offset=0, use_clob=True)
+            # Use Gamma API to get volume/liquidity data
+            print("Fetching trending markets by volume from Gamma API (for volume data)...")
+            volume_markets = await polymarket_client.get_markets(limit=300, offset=0, use_clob=False)
             
             # Separate markets by resolution window
             short_term_markets = []
@@ -494,10 +619,10 @@ class TradingBot:
             print(f"Found {len(short_term_markets)} short-term markets (1-2 weeks), {len(other_markets)} long-term markets")
             
             # Strategy 2: High liquidity markets - ONLY short-term
-            print("Fetching high liquidity short-term markets...")
+            print("Fetching high liquidity short-term markets from Gamma API...")
             try:
-                # Fetch with higher offset to get different markets
-                liquidity_markets = await polymarket_client.get_markets(limit=150, offset=100, use_clob=True)
+                # Fetch with higher offset to get different markets (use Gamma for volume data)
+                liquidity_markets = await polymarket_client.get_markets(limit=150, offset=100, use_clob=False)
                 short_term_count = 0
                 for market in liquidity_markets:
                     market_id = market.get('id')
@@ -565,14 +690,35 @@ class TradingBot:
             short_term_count = sum(1 for m in markets_list if self._is_market_in_resolution_window(m))
             print(f"Total markets after filtering: {len(markets_list)} ({short_term_count} short-term 1-2 weeks)")
             
-            return markets_list
+            # Enrich markets with CLOB API prices (keep Gamma volume data)
+            print("Enriching markets with CLOB API prices...")
+            # Debug: Log volume data before enrichment
+            if markets_list:
+                sample_market = markets_list[0]
+                sample_volume = float(sample_market.get('volumeNum', sample_market.get('volume', 0)))
+                sample_liquidity = float(sample_market.get('liquidityNum', sample_market.get('liquidity', 0)))
+                print(f"  Sample market before enrichment: volume={sample_volume:.0f}, liquidity={sample_liquidity:.0f}")
+            
+            enriched_markets = await self._enrich_markets_with_clob_prices(markets_list, polymarket_client)
+            print(f"Enriched {len(enriched_markets)} markets with CLOB prices")
+            
+            # Debug: Log volume data after enrichment
+            if enriched_markets:
+                sample_market = enriched_markets[0]
+                sample_volume = float(sample_market.get('volumeNum', sample_market.get('volume', 0)))
+                sample_liquidity = float(sample_market.get('liquidityNum', sample_market.get('liquidity', 0)))
+                print(f"  Sample market after enrichment: volume={sample_volume:.0f}, liquidity={sample_liquidity:.0f}")
+            
+            return enriched_markets
             
         except Exception as e:
             print(f"Error in expanded market fetch: {e}")
             import traceback
             traceback.print_exc()
-            # Fallback to basic fetch
-            return await polymarket_client.get_markets(limit=100, offset=0, use_clob=True)
+            # Fallback to basic fetch (Gamma API for volume)
+            markets = await polymarket_client.get_markets(limit=100, offset=0, use_clob=False)
+            # Enrich with CLOB prices
+            return await self._enrich_markets_with_clob_prices(markets, polymarket_client)
     
     async def _trading_loop(self, polymarket_client):
         """Main trading loop that runs continuously."""
@@ -589,8 +735,9 @@ class TradingBot:
                     print(f"Performing expanded market search (cycle {cycle_count})...")
                     markets = await self._fetch_markets_expanded(polymarket_client)
                 else:
-                    # In between, just refresh top markets (use CLOB API for trading bot)
-                    markets = await polymarket_client.get_markets(limit=200, offset=0, use_clob=True)
+                    # In between, just refresh top markets (use Gamma API for volume, then enrich with CLOB)
+                    markets = await polymarket_client.get_markets(limit=200, offset=0, use_clob=False)
+                    markets = await self._enrich_markets_with_clob_prices(markets, polymarket_client)
                 
                 if not markets:
                     print("WARNING: No markets fetched from Polymarket API")
@@ -636,17 +783,25 @@ class TradingBot:
                             continue  # Skip long-term markets
                         
                         # Filter: only analyze markets with minimum volume/liquidity (very relaxed)
-                        # NOTE: CLOB API doesn't return volume, so volume will be 0 - we need to allow that
+                        # NOTE: After enrichment, markets should have Gamma volume data + CLOB prices
                         volume = float(market.get('volumeNum', market.get('volume', 0)))
                         liquidity = float(market.get('liquidityNum', market.get('liquidity', 0)))
                         
-                        # Include if volume > 100 or liquidity > 200 OR if volume is 0 (CLOB API - no volume data)
-                        # CLOB API markets have accurate prices but no volume data, so we should still analyze them
+                        # Debug: Log first few markets being analyzed
+                        if analyzed_count < 3:
+                            print(f"  Market {market.get('id', 'unknown')[:30]}: volume={volume:.0f}, liquidity={liquidity:.0f}")
+                        
+                        # Include if volume > 100 or liquidity > 200 OR if volume is 0 (fallback for markets without volume)
+                        # After enrichment, most markets should have volume from Gamma API
                         if volume > 100 or liquidity > 200 or (volume == 0 and liquidity == 0):
                             analysis = await self.analyze_market(market)
                             self.market_analyses[analysis.market_id] = analysis
                             analyzed_count += 1
                             short_term_analyzed += 1
+                            
+                            # Debug: Log analysis results for first few
+                            if analyzed_count <= 3:
+                                print(f"    Analysis result: score={analysis.score:.2f}, volume_score={analysis.volume_score:.2f}, context_score={analysis.context_score:.2f}")
                             
                             # Limit analysis to prevent memory issues, prioritize trending (already sorted)
                             if analyzed_count >= 150:  # Analyze up to 150 markets
@@ -761,8 +916,9 @@ class TradingBot:
         
         while self.is_running:
             try:
-                # Fetch high-volume markets for scalping (top 100 by volume)
-                markets = await polymarket_client.get_markets(limit=100, offset=0, use_clob=True)
+                # Fetch high-volume markets for scalping (use Gamma API for volume, then enrich with CLOB)
+                markets = await polymarket_client.get_markets(limit=100, offset=0, use_clob=False)
+                markets = await self._enrich_markets_with_clob_prices(markets, polymarket_client)
                 
                 if not markets:
                     await asyncio.sleep(3)
@@ -825,42 +981,40 @@ class TradingBot:
                     outcome = opp['outcome']
                     market_title = market.get('question') or market.get('title') or market.get('name') or 'Unknown'
                     
-                    # Scalp position size: Flexible based on volume and balance (target ~$1, but can vary)
-                    base_size = 1.0
-                    volume_multiplier = 0.5 + (min(analysis.volume_score, 50) / 50) * 1.5
-                    position_size = base_size * volume_multiplier
-                    # Allow any size from $0.10 to balance (no artificial cap)
-                    position_size = max(0.10, min(position_size, self.balance * 0.10))
+                    # Scalp position size: 1-2% of portfolio
+                    position_pct = 0.015  # 1.5% base for scalps
+                    if abs(analysis.score) > 20:
+                        position_pct = 0.02  # 2% for high confidence
+                    elif abs(analysis.score) > 10:
+                        position_pct = 0.015  # 1.5% for medium confidence
+                    else:
+                        position_pct = 0.01  # 1% for low confidence
+                    
+                    position_size = self.balance * position_pct
+                    position_size = max(0.10, min(position_size, self.balance * 0.02))  # 1-2% of portfolio
                     
                     if position_size > self.balance:
                         continue
                     
-                    price_yes, price_no = self._get_outcome_prices(market)
-                    price = price_yes if outcome in ['Yes', 'YES', 'yes'] else price_no
-                    
-                    # Only filter out invalid prices (exactly 0 or 1, or outside 0-1 range)
-                    if price <= 0 or price >= 1.0:
+                    price_yes, price_no = await self._get_outcome_prices(market, self.polymarket_client)
+                    if price_yes is None or price_no is None:
                         continue
                     
-                    # Adjust position size based on remaining profit margin
-                    # If buying at 0.98, max profit is 0.02 per share, so we need larger size
+                    price = price_yes if outcome in ['Yes', 'YES', 'yes'] else price_no
+                    
+                    # Only allow prices between $0.10 and $0.99
+                    if price < 0.10 or price > 0.99:
+                        continue
+                    
+                    # Calculate remaining profit margin
                     max_profit_per_share = 1.0 - price if outcome in ['Yes', 'YES', 'yes'] else price
                     if max_profit_per_share <= 0:
                         continue  # No profit potential
                     
-                    # Scale position size inversely with profit margin to maintain target profit
-                    # Example: At 0.98 price (0.02 margin), we need 5x size to get same $ profit as at 0.50
-                    profit_margin_factor = max(0.02, max_profit_per_share)  # Minimum 2% margin
-                    adjusted_position_size = position_size / profit_margin_factor
-                    adjusted_position_size = max(0.10, min(adjusted_position_size, self.balance * 0.15))  # Cap at 15% for scalps
-                    
-                    if adjusted_position_size > self.balance:
-                        continue
-                    
                     # Execute scalp trade
                     reason = f"Volume Scalp: {outcome} @ {price:.3f} (Vol: {analysis.volume:.0f}, Margin: {max_profit_per_share:.3f})"
                     await self._open_position(market, analysis, outcome, market_title, price,
-                                            adjusted_position_size, 'volume_scalp', reason, 'scalp')
+                                            position_size, 'volume_scalp', reason, 'scalp')
                 
                 # Wait 2-5 seconds before next scalping cycle (randomized to avoid patterns)
                 wait_time = 2 + random.random() * 3  # 2-5 seconds
@@ -993,15 +1147,21 @@ class TradingBot:
                     'trade_type': 'swing'  # Default to swing
                 })
             
-            # Strategy 8: Ultra-permissive catch-all - trade on ANY analyzed market with minimal requirements
+            # Strategy 8: Ultra-permissive catch-all - trade on ANY analyzed market
             # This should catch ALL markets, including CLOB markets with 0 volume
-            elif abs(analysis.score) > 0:
-                direction = 'Yes' if analysis.score > 0 else 'No'
+            # Always add catch_all opportunity if no other strategy matched
+            # Use a simple direction based on price (if price_yes > 0.5, buy Yes, else buy No)
+            else:
+                # If score is exactly 0, use price-based direction
+                if analysis.score == 0:
+                    direction = 'Yes' if analysis.price_yes > 0.5 else 'No'
+                else:
+                    direction = 'Yes' if analysis.score > 0 else 'No'
                 opportunities.append({
                     'market': market,
                     'analysis': analysis,
                     'strategy': 'catch_all',
-                    'priority': 1,  # Low priority but will execute if nothing else
+                    'priority': max(1, abs(analysis.score) + 1),  # At least priority 1, higher if score exists
                     'outcome': direction,
                     'expected_profit_pct': 2,
                     'trade_type': 'swing'
@@ -1013,6 +1173,16 @@ class TradingBot:
         print(f"Found {len(opportunities)} trading opportunities")
         if opportunities:
             print(f"Top opportunity: {opportunities[0]['strategy']} on {opportunities[0]['market'].get('question', 'Unknown')[:60]}")
+            # Debug: Show top 5 opportunities
+            for i, opp in enumerate(opportunities[:5], 1):
+                print(f"  Opp {i}: {opp['strategy']} - score={opp['analysis'].score:.2f}, priority={opp['priority']:.1f}, outcome={opp['outcome']}")
+        else:
+            print("WARNING: No trading opportunities found! Checking why...")
+            if len(self.market_analyses) > 0:
+                # Show some analysis scores to debug
+                sample_analyses = list(self.market_analyses.values())[:5]
+                for analysis in sample_analyses:
+                    print(f"  Sample analysis: score={analysis.score:.2f}, volume={analysis.volume:.0f}, context_score={analysis.context_score:.2f}, price_yes={analysis.price_yes:.3f}")
         
         # Filter out scalping opportunities (handled separately in scalping loop)
         swing_opportunities = [opp for opp in opportunities if opp.get('trade_type') == 'swing']
@@ -1058,30 +1228,39 @@ class TradingBot:
             
             price_yes = analysis.price_yes
             price_no = analysis.price_no
+            
+            # Only allow prices between $0.10 and $0.99
+            if price_yes < 0.10 or price_yes > 0.99 or price_no < 0.10 or price_no > 0.99:
+                print(f"  -> Skipping arbitrage: Prices outside allowed range (Yes: {price_yes:.3f}, No: {price_no:.3f})")
+                return
+            
             total_cost = price_yes + price_no
             
             if total_cost >= 0.99:  # Not profitable after fees
                 return
             
-            # Flexible position sizing: 5-20% of balance for arbitrage
-            max_investment = self.balance * 0.20
-            min_investment = max(self.balance * 0.05, 1.0)  # At least $1 or 5% of balance, whichever is higher
+            # Position sizing: 1-2% of portfolio for arbitrage (split between Yes and No)
+            position_pct = 0.015  # 1.5% base
+            if analysis.arbitrage_opportunity and analysis.arbitrage_opportunity > 2:
+                position_pct = 0.02  # 2% for high arbitrage opportunity
+            else:
+                position_pct = 0.01  # 1% for lower opportunity
             
-            # Use amount between min and max
-            investment = min(max_investment, max(min_investment, self.balance * 0.10))
+            investment = self.balance * position_pct
+            investment = max(0.10, min(investment, self.balance * 0.02))  # 1-2% of portfolio
             shares = investment / total_cost
             
-            # Buy Yes
+            # Buy Yes (half of investment)
             cost_yes = shares * price_yes
-            if cost_yes <= self.balance and cost_yes >= 0.10:  # Minimum $0.10 position
+            if cost_yes <= self.balance and cost_yes >= 0.10:
                 position_key_yes = f"{analysis.market_id}-Yes"
                 if position_key_yes not in self.positions:
                     await self._open_position(market, analysis, 'Yes', market_title, price_yes, 
                                             cost_yes, strategy, f"Arbitrage: Buy Yes at {price_yes:.3f}", 'swing')
             
-            # Buy No
+            # Buy No (half of investment)
             cost_no = shares * price_no
-            if cost_no <= self.balance and cost_no >= 0.10:  # Minimum $0.10 position
+            if cost_no <= self.balance and cost_no >= 0.10:
                 position_key_no = f"{analysis.market_id}-No"
                 if position_key_no not in self.positions:
                     await self._open_position(market, analysis, 'No', market_title, price_no,
@@ -1102,9 +1281,9 @@ class TradingBot:
             price = price_yes if outcome in ['Yes', 'YES', 'yes'] else price_no
             position_key = f"{analysis.market_id}-{outcome}"
             
-            # Only filter out invalid prices (exactly 0 or 1, or outside 0-1 range)
-            if price <= 0 or price >= 1.0:
-                print(f"  -> Skipping: Invalid price {price}")
+            # Only allow prices between $0.10 and $0.99
+            if price < 0.10 or price > 0.99:
+                print(f"  -> Skipping: Price {price:.3f} outside allowed range (0.10-0.99)")
                 return
             
             # Don't open if position already exists
@@ -1121,67 +1300,35 @@ class TradingBot:
             # Determine trade type from opportunity
             trade_type = opportunity.get('trade_type', 'swing')
             
-            # Calculate position size based on strategy and trade type
-            # Note: Scalping positions are calculated in _scalping_loop()
-            if trade_type == 'scalp':
-                # This shouldn't be called from here, but handle it anyway - flexible sizing
-                base_scalp_size = 1.0
-                volume_multiplier = 0.3 + (min(analysis.volume_score, 50) / 50) * 2.0  # Wider range: 0.3x to 2.3x
-                position_size = base_scalp_size * volume_multiplier
-                position_size = max(0.10, min(position_size, self.balance * 0.15))  # Min $0.10, max 15% of balance
+            # Position size: Fixed 1-2% of portfolio for all trades
+            # Use 1.5% as base, with slight variation based on strategy confidence
+            base_position_pct = 0.015  # 1.5% base
+            
+            # Slight variation: 1.0% to 2.0% based on score confidence
+            if abs(analysis.score) > 20:
+                position_pct = 0.02  # 2% for high confidence
+            elif abs(analysis.score) > 10:
+                position_pct = 0.015  # 1.5% for medium confidence
             else:
-                # Swing trading: Flexible positions based on context and balance
-                if strategy == 'context_swing':
-                    # Context-based swing: 2-10% of balance (flexible)
-                    position_size = self.balance * (0.02 + (abs(analysis.context_score) / 100) * 0.08)
-                elif strategy == 'momentum':
-                    # 2-10% of balance for momentum trades
-                    position_size = self.balance * (0.02 + (abs(analysis.score) / 100) * 0.08)
-                elif strategy == 'mean_reversion':
-                    # 1.5-6% for mean reversion
-                    position_size = self.balance * (0.015 + (abs(analysis.score) / 100) * 0.045)
-                elif strategy == 'volume_breakout':
-                    # 3-8% for volume breakouts
-                    position_size = self.balance * (0.03 + (abs(analysis.score) / 100) * 0.05)
-                elif strategy == 'general':
-                    # 1-5% for general opportunities
-                    position_size = self.balance * (0.01 + (abs(analysis.score) / 100) * 0.04)
-                elif strategy == 'catch_all':
-                    # 0.5-3% for catch-all (very small positions)
-                    position_size = self.balance * (0.005 + (abs(analysis.score) / 100) * 0.025)
-                else:
-                    position_size = self.balance * 0.03
-                
-                # Flexible swing position sizing - no artificial minimum, max based on balance
-                position_size = min(position_size, self.balance * 0.20)  # Max 20% of balance
-                # Lower minimum for catch-all strategy
-                min_size = 0.50 if strategy == 'catch_all' else 1.0
-                position_size = max(position_size, min_size)  # Minimum $0.50 for catch-all, $1 for others
+                position_pct = 0.01  # 1% for low confidence
             
-            # Adjust position size based on profit margin for high-priced near-certain outcomes
-            # Example: Buying Yes at 0.98 (2% margin) needs larger size to capture meaningful profit
-            # Scale up position size inversely with profit margin, but cap it
-            profit_margin_factor = max(0.02, max_profit_per_share)  # Minimum 2% margin for calculation
-            adjusted_position_size = position_size / profit_margin_factor
+            position_size = self.balance * position_pct
             
-            # Cap adjusted size to prevent excessive risk
-            max_adjusted_size = self.balance * 0.25 if trade_type == 'swing' else self.balance * 0.15
-            adjusted_position_size = min(adjusted_position_size, max_adjusted_size)
-            # Don't reduce below 30% of base (was 50%, which could cause $0.50 positions)
-            adjusted_position_size = max(adjusted_position_size, position_size * 0.3)
+            # Ensure minimum of $0.10 and maximum of 2% of balance
+            position_size = max(0.10, min(position_size, self.balance * 0.02))
             
-            if adjusted_position_size <= self.balance and adjusted_position_size >= 0.10:
+            if position_size <= self.balance and position_size >= 0.10:
                 if trade_type == 'scalp':
                     reason = f"Volume Scalp: {outcome} @ {price:.3f} (Vol: {analysis.volume:.0f}, Margin: {max_profit_per_share:.3f})"
                 elif strategy == 'catch_all':
                     reason = f"Catch-All: {outcome} @ {price:.3f} (Score: {analysis.score:.1f}, Vol: {analysis.volume:.0f})"
                 else:
                     reason = f"{strategy.title()}: {outcome} @ {price:.3f} (Vol: {analysis.volume:.0f}, Margin: {max_profit_per_share:.3f})"
-                print(f"  -> Opening position: {outcome} @ ${price:.3f}, size: ${adjusted_position_size:.2f}")
+                print(f"  -> Opening position: {outcome} @ ${price:.3f}, size: ${position_size:.2f} ({position_pct*100:.1f}% of portfolio), balance: ${self.balance:.2f}")
                 await self._open_position(market, analysis, outcome, market_title, price,
-                                        adjusted_position_size, strategy, reason, trade_type)
+                                        position_size, strategy, reason, trade_type)
             else:
-                print(f"  -> Skipping: Position size ${adjusted_position_size:.2f} invalid (balance: ${self.balance:.2f})")
+                print(f"  -> Skipping: Position size ${position_size:.2f} invalid (balance: ${self.balance:.2f}, min: 0.10, max: {self.balance * 0.02:.2f})")
     
     async def _check_exit_conditions(self, markets: List[dict]):
         """Check all open positions for exit conditions."""
