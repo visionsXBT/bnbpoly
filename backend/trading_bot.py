@@ -325,10 +325,23 @@ class TradingBot:
         # Skip if we couldn't get prices
         if price_yes is None or price_no is None:
             # Return default analysis with zero scores
-            analysis.price_yes = 0.5
-            analysis.price_no = 0.5
-            analysis.score = 0
-            return analysis
+            return MarketAnalysis(
+                market_id=market_id,
+                volume=volume,
+                liquidity=liquidity,
+                trend=0.0,
+                momentum=0.0,
+                sentiment=0.5,
+                score=0.0,
+                arbitrage_opportunity=None,
+                spread=0.0,
+                price_yes=0.5,
+                price_no=0.5,
+                volume_24h=volume_24h,
+                liquidity_depth=liquidity,
+                volume_score=0.0,
+                context_score=0.0
+            )
         
         # Track price history for momentum calculation
         if market_id not in self.price_history:
@@ -377,7 +390,14 @@ class TradingBot:
         if momentum != 0:
             base_sentiment = 0.5 + (momentum / 200)  # Convert momentum to sentiment
         
-        volume_factor = min(1.0, volume_24h / 50000)  # Normalize: $50k = full factor
+        # Handle zero volume (CLOB API doesn't provide volume data)
+        # When volume is 0, use a default volume_factor to still allow trading
+        if volume_24h > 0:
+            volume_factor = min(1.0, volume_24h / 50000)  # Normalize: $50k = full factor
+        else:
+            # CLOB API: no volume data, but still allow trading based on price signals
+            volume_factor = 0.3  # Default to 30% to allow some volume-based scoring
+        
         sentiment = max(0.0, min(1.0, base_sentiment * (0.6 + volume_factor * 0.4)))
         
         # Calculate trading score
@@ -386,6 +406,7 @@ class TradingBot:
             score = 80 + min(20, arbitrage_opportunity * 2)  # 80-100 for arbitrage
         else:
             # Volume strategy: Higher volume = more reliable
+            # When volume is 0 (CLOB), still give some score based on other factors
             volume_score = volume_factor * 30
             
             # Momentum strategy: Lower threshold for momentum
@@ -395,7 +416,11 @@ class TradingBot:
             trend_score = abs(trend) * 2 if abs(trend) > 0.05 else 0  # Lowered from 0.1
             
             # Liquidity strategy: Higher liquidity = better execution
-            liquidity_score = min(20, liquidity / 1000) if liquidity > 0 else 0
+            # When liquidity is 0 (CLOB), give a default score
+            if liquidity > 0:
+                liquidity_score = min(20, liquidity / 1000)
+            else:
+                liquidity_score = 5  # Default liquidity score for CLOB markets
             
             # Mean reversion: Expanded price ranges for more opportunities
             mean_reversion_score = 0
@@ -410,6 +435,7 @@ class TradingBot:
             
             # Calculate separate volume and context scores
             # Volume score: purely based on trading volume and liquidity (for scalping)
+            # When volume is 0, still give some score based on liquidity and other factors
             volume_score_value = (volume_factor * 50) + (liquidity_score * 1.5)
             
             # Context score: based on trend, momentum, sentiment (for swing trading)
@@ -479,7 +505,8 @@ class TradingBot:
                         # Only include if it's in resolution window
                         if self._is_market_in_resolution_window(market):
                             liquidity = float(market.get('liquidityNum', market.get('liquidity', 0)))
-                            if liquidity > 2000:
+                            # Allow CLOB markets (liquidity == 0) or high liquidity markets
+                            if liquidity > 2000 or liquidity == 0:
                                 all_markets[market_id] = market
                                 market_ids_seen.add(market_id)
                                 short_term_count += 1
@@ -506,8 +533,8 @@ class TradingBot:
                             if self._is_market_in_resolution_window(market):
                                 volume = float(market.get('volumeNum', market.get('volume', 0)))
                                 liquidity = float(market.get('liquidityNum', market.get('liquidity', 0)))
-                                # Include if it has reasonable volume or liquidity
-                                if volume > 500 or liquidity > 800:
+                                # Include if it has reasonable volume or liquidity OR if volume/liquidity is 0 (CLOB API)
+                                if volume > 500 or liquidity > 800 or (volume == 0 and liquidity == 0):
                                     all_markets[market_id] = market
                                     market_ids_seen.add(market_id)
                                     short_term_count += 1
@@ -609,11 +636,13 @@ class TradingBot:
                             continue  # Skip long-term markets
                         
                         # Filter: only analyze markets with minimum volume/liquidity (very relaxed)
+                        # NOTE: CLOB API doesn't return volume, so volume will be 0 - we need to allow that
                         volume = float(market.get('volumeNum', market.get('volume', 0)))
                         liquidity = float(market.get('liquidityNum', market.get('liquidity', 0)))
                         
-                        # Include if volume > 100 or liquidity > 200 (much more relaxed)
-                        if volume > 100 or liquidity > 200:
+                        # Include if volume > 100 or liquidity > 200 OR if volume is 0 (CLOB API - no volume data)
+                        # CLOB API markets have accurate prices but no volume data, so we should still analyze them
+                        if volume > 100 or liquidity > 200 or (volume == 0 and liquidity == 0):
                             analysis = await self.analyze_market(market)
                             self.market_analyses[analysis.market_id] = analysis
                             analyzed_count += 1
@@ -755,8 +784,10 @@ class TradingBot:
                         liquidity = float(market.get('liquidityNum', market.get('liquidity', 0)))
                         
                         # Scalping requires reasonable volume (relaxed)
-                        if volume < 500 or liquidity < 300:
+                        # Allow CLOB markets (volume == 0) since they have accurate prices
+                        if (volume > 0 and volume < 500) or (liquidity > 0 and liquidity < 300):
                             continue
+                        # If volume is 0, it's from CLOB API - allow it for scalping
                         
                         # Quick analysis for scalping
                         analysis = await self.analyze_market(market)
@@ -888,7 +919,8 @@ class TradingBot:
                 })
             
             # Strategy 2: Momentum trades (very relaxed thresholds)
-            elif abs(analysis.score) > 10 and analysis.volume > 500:  # Much more relaxed
+            # Allow trades even if volume is 0 (CLOB API doesn't provide volume)
+            elif abs(analysis.score) > 10 and (analysis.volume > 500 or analysis.volume == 0):
                 direction = 'Yes' if analysis.score > 0 else 'No'
                 opportunities.append({
                     'market': market,
@@ -918,7 +950,8 @@ class TradingBot:
                 })
             
             # Strategy 4: Volume breakouts (very relaxed)
-            elif abs(analysis.score) > 8 and analysis.volume_24h > 2000 and abs(analysis.momentum) > 0.5:  # Much more relaxed
+            # Allow trades even if volume_24h is 0 (CLOB API doesn't provide volume)
+            elif abs(analysis.score) > 8 and (analysis.volume_24h > 2000 or analysis.volume_24h == 0) and abs(analysis.momentum) > 0.5:  # Much more relaxed
                 direction = 'Yes' if analysis.momentum > 0 else 'No'
                 opportunities.append({
                     'market': market,
@@ -947,7 +980,8 @@ class TradingBot:
                 })
             
             # Strategy 7: General opportunity catch-all (very relaxed)
-            elif abs(analysis.score) > 5 and (analysis.volume > 300 or analysis.liquidity > 200):  # Much more relaxed
+            # Allow trades even if volume/liquidity is 0 (CLOB API doesn't provide this)
+            elif abs(analysis.score) > 5 and (analysis.volume > 300 or analysis.liquidity > 200 or (analysis.volume == 0 and analysis.liquidity == 0)):  # Much more relaxed
                 direction = 'Yes' if analysis.score > 0 else 'No'
                 opportunities.append({
                     'market': market,
@@ -960,7 +994,8 @@ class TradingBot:
                 })
             
             # Strategy 8: Ultra-permissive catch-all - trade on ANY analyzed market with minimal requirements
-            elif abs(analysis.score) > 0 and (analysis.volume > 100 or analysis.liquidity > 100):
+            # This should catch ALL markets, including CLOB markets with 0 volume
+            elif abs(analysis.score) > 0:
                 direction = 'Yes' if analysis.score > 0 else 'No'
                 opportunities.append({
                     'market': market,
