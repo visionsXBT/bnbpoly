@@ -1181,18 +1181,22 @@ class TradingBot:
             
             # Strategy 8: Ultra-permissive catch-all - trade on ANY analyzed market
             # This should catch ALL markets - score is always positive now
+            # ALWAYS add catch_all if no other strategy matched
             else:
                 # Use price-based direction
                 direction = 'Yes' if analysis.price_yes > 0.5 else 'No'
+                # Give it a high priority to ensure it executes
+                priority = max(10, analysis.score)  # At least priority 10 to ensure execution
                 opportunities.append({
                     'market': market,
                     'analysis': analysis,
                     'strategy': 'catch_all',
-                    'priority': max(1, analysis.score),  # At least priority 1, use actual score
+                    'priority': priority,
                     'outcome': direction,
                     'expected_profit_pct': 2,
                     'trade_type': 'swing'
                 })
+                print(f"    Added catch_all opportunity: score={analysis.score:.2f}, priority={priority}, direction={direction}")
         
         # Sort by priority and execute top opportunities
         opportunities.sort(key=lambda x: x['priority'], reverse=True)
@@ -1215,22 +1219,29 @@ class TradingBot:
         swing_opportunities = [opp for opp in opportunities if opp.get('trade_type') == 'swing']
         
         print(f"Executing {min(len(swing_opportunities), 6)} swing trades from {len(swing_opportunities)} opportunities")
+        print(f"Current balance: ${self.balance:.2f}, Active positions: {len(self.positions)}")
         
         # Execute swing trades (larger, context-based positions)
         max_swings_per_cycle = 6  # Focus on swing trades in main loop
         trades_executed = 0
         
-        for opp in swing_opportunities[:max_swings_per_cycle]:
+        if len(swing_opportunities) == 0:
+            print("ERROR: No swing opportunities to execute! This should not happen if opportunities were found.")
+        
+        for i, opp in enumerate(swing_opportunities[:max_swings_per_cycle]):
             if trades_executed >= max_swings_per_cycle:
                 break
             try:
+                print(f"  Attempting to execute opportunity {i+1}/{min(len(swing_opportunities), max_swings_per_cycle)}: {opp['strategy']}")
                 await self._execute_opportunity(opp)
                 trades_executed += 1
-                print(f"Executed trade: {opp['strategy']} on {opp['market'].get('question', 'Unknown')[:50]}")
+                print(f"  ✓ SUCCESS: Executed trade {trades_executed}: {opp['strategy']} on {opp['market'].get('question', 'Unknown')[:50]}")
             except Exception as e:
-                print(f"Error executing opportunity: {e}")
+                print(f"  ✗ ERROR executing opportunity {i+1}: {e}")
                 import traceback
                 traceback.print_exc()
+        
+        print(f"Total trades executed this cycle: {trades_executed}")
         
         # Note: Scalping trades are handled separately in _scalping_loop()
         
@@ -1245,7 +1256,8 @@ class TradingBot:
         outcome_str = opportunity['outcome']
         market_title = market.get('question') or market.get('title') or market.get('name') or 'Unknown Market'
         
-        print(f"Executing opportunity: {strategy} on {market_title[:60]}, outcome: {outcome_str}")
+        print(f"  [_execute_opportunity] Strategy: {strategy}, Outcome: {outcome_str}, Market: {market_title[:50]}")
+        print(f"  [_execute_opportunity] Balance: ${self.balance:.2f}, Analysis score: {analysis.score:.2f}, Price Yes: {analysis.price_yes:.3f}, Price No: {analysis.price_no:.3f}")
         
         # Arbitrage: Buy both outcomes
         if strategy == 'arbitrage' and outcome_str == 'both':
@@ -1302,14 +1314,21 @@ class TradingBot:
             
             # Skip if we couldn't extract prices
             if price_yes is None or price_no is None:
-                print(f"  -> Skipping: Could not extract prices (Yes: {price_yes}, No: {price_no})")
+                print(f"  -> ✗ SKIPPING: Could not extract prices (Yes: {price_yes}, No: {price_no})")
                 print(f"     Market data keys: {list(market.keys())[:10]}")
-                return
+                print(f"     Using analysis prices as fallback: Yes={analysis.price_yes:.3f}, No={analysis.price_no:.3f}")
+                # FALLBACK: Use analysis prices
+                price_yes = analysis.price_yes
+                price_no = analysis.price_no
+                if price_yes is None or price_no is None:
+                    print(f"  -> ✗ SKIPPING: Analysis prices also None")
+                    return
+                print(f"  -> Using analysis prices: Yes={price_yes:.3f}, No={price_no:.3f}")
             
             price = price_yes if outcome in ['Yes', 'YES', 'yes'] else price_no
             position_key = f"{analysis.market_id}-{outcome}"
             
-            # For catch_all strategy, be more lenient with price range (0.01-0.99)
+            # For catch_all strategy, be VERY lenient with price range (0.01-0.99)
             # For other strategies, enforce 0.10-0.99
             if strategy == 'catch_all':
                 min_price = 0.01
@@ -1328,12 +1347,20 @@ class TradingBot:
                 else:
                     price = analysis.price_no
                 
-                # Check again with analysis prices
-                if price < min_price or price > max_price:
-                    print(f"  -> Still skipping: Analysis price {price:.3f} also outside range")
-                    return
+                # For catch_all, be even more lenient - allow any price between 0.01 and 0.99
+                if strategy == 'catch_all':
+                    if 0.01 <= price <= 0.99:
+                        print(f"  -> Using analysis price {price:.3f} for catch_all (lenient range)")
+                    else:
+                        print(f"  -> Still skipping: Analysis price {price:.3f} outside even lenient range")
+                        return
                 else:
-                    print(f"  -> Using analysis price {price:.3f} (was outside range, now using fallback)")
+                    # Check again with analysis prices for other strategies
+                    if price < min_price or price > max_price:
+                        print(f"  -> Still skipping: Analysis price {price:.3f} also outside range")
+                        return
+                    else:
+                        print(f"  -> Using analysis price {price:.3f} (was outside range, now using fallback)")
             
             # Don't open if position already exists
             if position_key in self.positions:
