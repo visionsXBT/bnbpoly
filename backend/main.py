@@ -43,7 +43,6 @@ allowed_origins = [
     "http://polyscout.xyz",   # HTTP version (if needed)
     "https://www.polyscout.xyz",  # www subdomain
     "http://www.polyscout.xyz",   # www subdomain HTTP
-    "*",  # Allow all origins (for debugging - can be restricted later)
 ]
 
 # Note: We'll use explicit origins + regex pattern instead of wildcard
@@ -79,16 +78,16 @@ if custom_domain:
 # Print allowed origins for debugging
 print(f"CORS allowed origins: {allowed_origins}")
 
-# Add CORS middleware - use regex to allow all origins for now
-# This will match any origin and fix the CORS issue
-# We can restrict this later once we confirm it's working
+# Add CORS middleware - use regex to allow ALL origins
+# This will fix the CORS issue immediately
+# IMPORTANT: allow_credentials must be False when using allow_origin_regex with .*
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allowed_origins,  # Keep explicit origins
-    allow_origin_regex=r".*",  # Allow any origin - this will fix the CORS issue
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-    allow_headers=["*"],
+    allow_origins=allowed_origins,  # Explicit origins
+    allow_origin_regex=r"https?://.*",  # Allow ANY origin - matches http:// and https://
+    allow_credentials=False,  # Must be False when using regex that matches all
+    allow_methods=["*"],  # Allow all methods
+    allow_headers=["*"],  # Allow all headers
     expose_headers=["*"],
     max_age=3600,  # Cache preflight requests for 1 hour
 )
