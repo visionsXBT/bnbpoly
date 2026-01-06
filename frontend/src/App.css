@@ -6,6 +6,8 @@
   display: flex;
   flex-direction: column;
   position: relative;
+  box-sizing: border-box;
+  overflow-x: hidden;
 }
 
 .header {
@@ -49,6 +51,7 @@
   overflow-y: auto;
   overflow-x: hidden;
   flex-shrink: 0;
+  box-sizing: border-box;
 }
 
 .trending-title {
@@ -134,6 +137,8 @@
   padding: 20px;
   margin-top: 20px;
   justify-content: right;
+  box-sizing: border-box;
+  overflow-x: hidden;
 }
 
 .chat-container {
@@ -144,6 +149,8 @@
   flex-direction: column;
   height: 100%;
   overflow: hidden;
+  box-sizing: border-box;
+  width: 100%;
 }
 
 
@@ -292,12 +299,16 @@
 
 @media (max-width: 768px) {
   .app {
-    height: 100vh;
+    height: 50vh; /* Upper half of screen below header */
     padding: 0;
+    max-width: 100%;
+    width: 100%;
   }
 
   .header {
     padding: 12px 16px;
+    flex-wrap: wrap;
+    gap: 10px;
   }
 
   .logo {
@@ -310,15 +321,54 @@
   }
 
   .app-layout {
+    flex-direction: column;
     padding: 0;
+    margin: 0;
+    gap: 0;
+    max-width: 100%;
+    width: 100%;
+    height: calc(100vh - var(--header-height, 80px));
+    overflow-x: hidden;
   }
 
   .chat-container {
     border-radius: 0;
+    width: 100%;
+    height: 50vh; /* Upper half */
+    flex-shrink: 0;
+    border-left: none;
+    border-right: none;
+  }
+
+  .trending-sidebar {
+    width: 100%;
+    height: 50vh; /* Lower half */
+    border-left: none;
+    border-right: none;
+    border-top: 1px solid #00FF00;
+    border-bottom: none;
+    flex-shrink: 0;
+    padding: 12px;
   }
 
   .message-content {
     max-width: 85%;
+    font-size: 14px;
+  }
+
+  .trending-title {
+    font-size: 14px;
+    margin-bottom: 8px;
+  }
+
+  .trending-market-link {
+    font-size: 11px;
+    padding: 6px 8px;
+  }
+
+  .trending-market-image {
+    width: 24px;
+    height: 24px;
   }
 }
 

@@ -1041,8 +1041,10 @@ class TradingBot:
                 position.current_price = current_price
                 
                 # Calculate unrealized P&L
-                price_diff = current_price - position.entry_price
-                position.unrealized_pnl = price_diff * position.size
+                # Current value of position: position.size * (current_price / entry_price)
+                # Unrealized P&L = current value - original investment
+                current_value = position.size * (current_price / position.entry_price)
+                position.unrealized_pnl = current_value - position.size
                 
                 self.positions[position_key] = position
     
@@ -1833,12 +1835,16 @@ Respond ONLY with valid JSON, no other text."""
         if position_key not in self.positions:
             return
         
-        # Calculate profit/loss
-        price_diff = current_price - position.entry_price
-        profit = price_diff * position.size
+        # Calculate the current value of the position
+        # When we bought, we spent position.size dollars at entry_price
+        # Now the position is worth: position.size * (current_price / entry_price)
+        current_value = position.size * (current_price / position.entry_price)
         
-        # Add balance back with profit/loss
-        self.balance += position.size + profit
+        # Calculate profit/loss: current value minus original investment
+        profit = current_value - position.size
+        
+        # Add back the current value (which includes the original investment + profit/loss)
+        self.balance += current_value
         
         # Update P&L history after closing position
         self._update_pnl_history()
