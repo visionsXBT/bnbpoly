@@ -74,6 +74,8 @@ body::before {
   z-index: 0;
   pointer-events: none;
   will-change: mask-position, -webkit-mask-position;
+  transform: translateZ(0); /* Force GPU acceleration */
+  backface-visibility: hidden; /* Improve performance */
 }
 
 body::after {
