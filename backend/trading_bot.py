@@ -842,9 +842,11 @@ class TradingBot:
     
     async def _trading_loop(self, polymarket_client):
         """Main trading loop that runs continuously."""
-        print("=" * 60)
-        print("TRADING LOOP STARTED")
-        print("=" * 60)
+        debug_mode = os.getenv("DEBUG", "false").lower() == "true"
+        if debug_mode:
+            print("=" * 60)
+            print("TRADING LOOP STARTED")
+            print("=" * 60)
         cycle_count = 0
         while self.is_running:
             try:
@@ -856,39 +858,41 @@ class TradingBot:
                 
                 # Fetch markets from CLOB API
                 markets = []
+                debug_mode = os.getenv("DEBUG", "false").lower() == "true"
                 if self.clob_client:
                     try:
-                        print(f"Fetching markets from CLOB API (cycle {cycle_count})...")
+                        if debug_mode:
+                            print(f"Fetching markets from CLOB API (cycle {cycle_count})...")
                         clob_response = await self.clob_client.get_markets()
                         
                         if hasattr(clob_response, 'data') and isinstance(clob_response.data, list):
                             markets = clob_response.data
-                            print(f"Fetched {len(markets)} markets from CLOB API")
                         elif isinstance(clob_response, dict) and 'data' in clob_response:
                             markets = clob_response['data']
-                            print(f"Fetched {len(markets)} markets from CLOB API (dict format)")
                         elif isinstance(clob_response, list):
                             markets = clob_response
-                            print(f"Fetched {len(markets)} markets from CLOB API (list format)")
                         else:
-                            print(f"Unexpected CLOB response format: {type(clob_response)}, falling back to Gamma API")
+                            if debug_mode:
+                                print(f"Unexpected CLOB response format: {type(clob_response)}, falling back to Gamma API")
                             markets = await polymarket_client.get_markets(limit=200, offset=0, use_clob=False)
                     except Exception as e:
-                        print(f"Error fetching from CLOB API: {e}, falling back to Gamma API")
-                        import traceback
-                        traceback.print_exc()
+                        if debug_mode:
+                            print(f"Error fetching from CLOB API: {e}, falling back to Gamma API")
+                            import traceback
+                            traceback.print_exc()
                         markets = await polymarket_client.get_markets(limit=200, offset=0, use_clob=False)
                 else:
-                    print("CLOB client not available, using Gamma API")
                     markets = await polymarket_client.get_markets(limit=200, offset=0, use_clob=False)
                 
                 if not markets:
-                    print("WARNING: No markets fetched from Polymarket API")
+                    if debug_mode:
+                        print("WARNING: No markets fetched from Polymarket API")
                     await asyncio.sleep(10)
                     continue
                 
-                print(f"Fetched {len(markets)} markets from Polymarket")
-                print(f"Analyzing {len(markets)} markets for trading opportunities...")
+                if debug_mode:
+                    print(f"Fetched {len(markets)} markets from Polymarket")
+                    print(f"Analyzing {len(markets)} markets for trading opportunities...")
                 
                 # Analyze all fetched markets, prioritizing short-term trending markets
                 analyzed_count = 0
@@ -985,6 +989,10 @@ class TradingBot:
                         if k in market_ids_in_list
                     }
                     self.market_analyses = analyses_to_keep
+                
+                # Periodic cleanup every 20 cycles
+                if cycle_count % 20 == 0:
+                    self._cleanup_old_data()
                 
                 # Keep only last 500 trades to prevent memory issues
                 if len(self.trades) > 500:
@@ -1905,6 +1913,27 @@ Respond ONLY with valid JSON, no other text."""
         # Keep only last 200 data points (to prevent memory issues)
         if len(self.pnl_history) > 200:
             self.pnl_history = self.pnl_history[-200:]
+    
+    def _cleanup_old_data(self):
+        """Clean up old data to prevent memory growth."""
+        # Limit trades to last 1000
+        if len(self.trades) > 1000:
+            self.trades = self.trades[:1000]
+        
+        # Limit market analyses to last 500
+        if len(self.market_analyses) > 500:
+            # Keep most recent analyses
+            sorted_analyses = sorted(
+                self.market_analyses.items(),
+                key=lambda x: getattr(x[1], 'timestamp', datetime.now()) if hasattr(x[1], 'timestamp') else datetime.now(),
+                reverse=True
+            )
+            self.market_analyses = dict(sorted_analyses[:500])
+        
+        # Limit price history to last 100 entries per market
+        for market_id in list(self.price_history.keys()):
+            if len(self.price_history[market_id]) > 100:
+                self.price_history[market_id] = self.price_history[market_id][-100:]
     
     def get_pnl_history(self, limit: int = 100) -> List[dict]:
         """Get P&L history for charting."""

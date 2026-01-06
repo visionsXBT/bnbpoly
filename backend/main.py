@@ -6,10 +6,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.middleware.base import BaseHTTPMiddleware
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Dict
 import os
 import json
+import time
+from functools import lru_cache
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from polymarket_client import PolymarketClient
 from insight_generator import InsightGenerator
@@ -95,6 +99,71 @@ if custom_domain:
 
 # Print allowed origins for debugging
 print(f"CORS allowed origins: {allowed_origins}")
+
+# Simple in-memory cache for frequently accessed endpoints
+_response_cache: Dict[str, tuple] = {}  # key: (response, expiry_time)
+
+def get_cached_response(cache_key: str, ttl: int = 5) -> Optional[Dict]:
+    """Get cached response if not expired."""
+    if cache_key in _response_cache:
+        response, expiry = _response_cache[cache_key]
+        if time.time() < expiry:
+            return response
+        else:
+            del _response_cache[cache_key]
+    return None
+
+def set_cached_response(cache_key: str, response: Dict, ttl: int = 5):
+    """Cache a response with TTL in seconds."""
+    expiry = time.time() + ttl
+    _response_cache[cache_key] = (response, expiry)
+    # Clean up expired entries periodically (keep cache size reasonable)
+    if len(_response_cache) > 1000:
+        now = time.time()
+        expired_keys = [k for k, (_, exp) in _response_cache.items() if exp < now]
+        for k in expired_keys:
+            del _response_cache[k]
+
+# Rate limiting middleware
+class RateLimitMiddleware(BaseHTTPMiddleware):
+    """Simple rate limiting to prevent API abuse."""
+    def __init__(self, app, calls_per_minute: int = 120):
+        super().__init__(app)
+        self.calls_per_minute = calls_per_minute
+        self.requests: Dict[str, List[float]] = {}
+    
+    async def dispatch(self, request: Request, call_next):
+        # Skip rate limiting for health checks and WebSocket
+        if request.url.path in ["/", "/health"] or request.url.path.startswith("/api/trades/stream"):
+            return await call_next(request)
+        
+        client_ip = request.client.host if request.client else "unknown"
+        now = time.time()
+        
+        # Clean old requests
+        if client_ip in self.requests:
+            self.requests[client_ip] = [
+                req_time for req_time in self.requests[client_ip]
+                if now - req_time < 60
+            ]
+        else:
+            self.requests[client_ip] = []
+        
+        # Check rate limit
+        if len(self.requests[client_ip]) >= self.calls_per_minute:
+            return JSONResponse(
+                status_code=429,
+                content={"detail": "Rate limit exceeded. Please try again later."},
+                headers={"Retry-After": "60"}
+            )
+        
+        # Record this request
+        self.requests[client_ip].append(now)
+        
+        return await call_next(request)
+
+# Add rate limiting middleware (before CORS)
+app.add_middleware(RateLimitMiddleware, calls_per_minute=120)
 
 # Add CORS middleware - use regex to allow ALL origins
 # This will fix the CORS issue immediately
@@ -327,8 +396,16 @@ async def chat(message: ChatMessage):
 async def get_markets(limit: int = 20, offset: int = 0):
     """Get list of active markets."""
     try:
+        # Cache markets for 10 seconds (they don't change that frequently)
+        cache_key = f"markets_{limit}_{offset}"
+        cached = get_cached_response(cache_key, ttl=10)
+        if cached:
+            return cached
+        
         markets = await polymarket_client.get_markets(limit=limit, offset=offset)
-        return {"markets": markets}
+        response = {"markets": markets}
+        set_cached_response(cache_key, response, ttl=10)
+        return response
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching markets: {str(e)}")
 
@@ -466,65 +543,76 @@ async def stream_price_updates(websocket: WebSocket):
 @app.get("/api/trading/stats")
 async def get_trading_stats():
     """Get trading bot statistics."""
-    bot_instance_id = id(trading_bot)
-    print(f"API /stats: Trading bot instance ID: {bot_instance_id}")
-    print(f"API /stats: Bot has {len(trading_bot.trades)} trades, {len(trading_bot.positions)} positions")
-    stats = trading_bot.get_stats()
-    print(f"API: Returning stats: {stats}")
+    # Cache stats for 2 seconds (called frequently by frontend)
+    cache_key = "trading_stats"
+    cached = get_cached_response(cache_key, ttl=2)
+    if cached:
+        return cached
     
-    # Add debug info to stats response
-    stats["_debug"] = {
-        "bot_instance_id": str(bot_instance_id),
-        "bot_is_running": trading_bot.is_running,
-        "internal_trades_count": len(trading_bot.trades),
-        "has_claude_client": trading_bot.claude_client is not None,
-        "has_clob_client": trading_bot.clob_client is not None,
-        "clob_initialized": trading_bot._clob_initialized if hasattr(trading_bot, '_clob_initialized') else False,
-        "market_analyses_count": len(trading_bot.market_analyses)
-    }
+    bot_instance_id = id(trading_bot)
+    # Reduce logging in production
+    if os.getenv("DEBUG", "false").lower() == "true":
+        print(f"API /stats: Trading bot instance ID: {bot_instance_id}")
+        print(f"API /stats: Bot has {len(trading_bot.trades)} trades, {len(trading_bot.positions)} positions")
+    
+    stats = trading_bot.get_stats()
+    
+    # Add debug info to stats response (only in debug mode)
+    if os.getenv("DEBUG", "false").lower() == "true":
+        stats["_debug"] = {
+            "bot_instance_id": str(bot_instance_id),
+            "bot_is_running": trading_bot.is_running,
+            "internal_trades_count": len(trading_bot.trades),
+            "has_claude_client": trading_bot.claude_client is not None,
+            "has_clob_client": trading_bot.clob_client is not None,
+            "clob_initialized": trading_bot._clob_initialized if hasattr(trading_bot, '_clob_initialized') else False,
+            "market_analyses_count": len(trading_bot.market_analyses)
+        }
+    
+    set_cached_response(cache_key, stats, ttl=2)
     return stats
 
 
 @app.get("/api/trading/positions")
 async def get_trading_positions():
     """Get all open trading positions."""
+    # Cache positions for 2 seconds
+    cache_key = "trading_positions"
+    cached = get_cached_response(cache_key, ttl=2)
+    if cached:
+        return cached
+    
     positions = trading_bot.get_positions()
-    print(f"API: Returning {len(positions)} positions")
-    return {"positions": positions}
+    if os.getenv("DEBUG", "false").lower() == "true":
+        print(f"API: Returning {len(positions)} positions")
+    
+    response = {"positions": positions}
+    set_cached_response(cache_key, response, ttl=2)
+    return response
 
 
 @app.get("/api/trading/trades")
 async def get_trading_trades(limit: int = 100):
     """Get recent trades."""
-    # Verify we're accessing the same instance
-    bot_instance_id = id(trading_bot)
-    print(f"API /trades: Trading bot instance ID: {bot_instance_id}")
-    print(f"API /trades: Bot is_running: {trading_bot.is_running}")
-    print(f"API /trades: Bot has {len(trading_bot.trades)} trades in internal list")
-    print(f"API /trades: Bot has {len(trading_bot.positions)} positions")
-    print(f"API /trades: Bot balance: ${trading_bot.balance}")
+    # Cache trades for 2 seconds
+    cache_key = f"trading_trades_{limit}"
+    cached = get_cached_response(cache_key, ttl=2)
+    if cached:
+        return cached
     
-    # Debug: Check internal trades list
-    if len(trading_bot.trades) > 0:
-        print(f"API: First internal trade: {trading_bot.trades[0]}")
-        print(f"API: First internal trade type: {type(trading_bot.trades[0])}")
-        print(f"API: First internal trade has id: {hasattr(trading_bot.trades[0], 'id')}")
-        if hasattr(trading_bot.trades[0], 'id'):
-            print(f"API: First internal trade id: {trading_bot.trades[0].id}")
+    bot_instance_id = id(trading_bot)
+    # Reduce logging in production
+    if os.getenv("DEBUG", "false").lower() == "true":
+        print(f"API /trades: Trading bot instance ID: {bot_instance_id}")
+        print(f"API /trades: Bot is_running: {trading_bot.is_running}")
+        print(f"API /trades: Bot has {len(trading_bot.trades)} trades in internal list")
     
     trades = trading_bot.get_recent_trades(limit=limit)
-    print(f"API: get_recent_trades returned {len(trades)} trades")
-    if len(trades) > 0:
-        print(f"API: First trade sample: {trades[0]}")
-    else:
-        print(f"API: WARNING - No trades returned! Internal list has {len(trading_bot.trades)} trades")
-        if len(trading_bot.trades) > 0:
-            print(f"API: ERROR - Trades exist but get_recent_trades returned empty list!")
     
-    # Include debug info in response so frontend can see it
-    return {
-        "trades": trades,
-        "_debug": {
+    # Include debug info only in debug mode
+    response = {"trades": trades}
+    if os.getenv("DEBUG", "false").lower() == "true":
+        response["_debug"] = {
             "bot_instance_id": str(bot_instance_id),
             "bot_is_running": trading_bot.is_running,
             "internal_trades_count": len(trading_bot.trades),
@@ -535,23 +623,45 @@ async def get_trading_trades(limit: int = 100):
             "has_clob_client": trading_bot.clob_client is not None,
             "market_analyses_count": len(trading_bot.market_analyses)
         }
-    }
+    
+    set_cached_response(cache_key, response, ttl=2)
+    return response
 
 
 @app.get("/api/trading/analyses")
 async def get_market_analyses():
     """Get market analyses."""
+    # Cache analyses for 5 seconds
+    cache_key = "trading_analyses"
+    cached = get_cached_response(cache_key, ttl=5)
+    if cached:
+        return cached
+    
     analyses = trading_bot.get_market_analyses()
-    print(f"API: Returning {len(analyses)} market analyses")
-    return {"analyses": analyses}
+    if os.getenv("DEBUG", "false").lower() == "true":
+        print(f"API: Returning {len(analyses)} market analyses")
+    
+    response = {"analyses": analyses}
+    set_cached_response(cache_key, response, ttl=5)
+    return response
 
 
 @app.get("/api/trading/pnl-history")
 async def get_pnl_history(limit: int = 100):
     """Get P&L history for charting."""
+    # Cache P&L history for 2 seconds
+    cache_key = f"pnl_history_{limit}"
+    cached = get_cached_response(cache_key, ttl=2)
+    if cached:
+        return cached
+    
     history = trading_bot.get_pnl_history(limit=limit)
-    print(f"API: Returning {len(history)} P&L history entries")
-    return {"history": history}
+    if os.getenv("DEBUG", "false").lower() == "true":
+        print(f"API: Returning {len(history)} P&L history entries")
+    
+    response = {"history": history}
+    set_cached_response(cache_key, response, ttl=2)
+    return response
 
 
 if __name__ == "__main__":

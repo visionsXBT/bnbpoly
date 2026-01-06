@@ -21,7 +21,13 @@ class PolymarketClient:
     
     def __init__(self, api_url: Optional[str] = None):
         self.api_url = api_url or os.getenv("POLYMARKET_API_URL", "https://gamma-api.polymarket.com")
-        self.client = httpx.AsyncClient(timeout=30.0)
+        # Optimize HTTP client with connection pooling and limits
+        limits = httpx.Limits(max_keepalive_connections=20, max_connections=100, keepalive_expiry=30.0)
+        self.client = httpx.AsyncClient(
+            timeout=httpx.Timeout(30.0, connect=10.0),
+            limits=limits,
+            http2=True  # Enable HTTP/2 for better performance
+        )
         
         # Initialize CLOB client for accurate price data
         if CLOB_AVAILABLE:
