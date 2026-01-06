@@ -210,24 +210,12 @@ class InsightGenerator:
         # If no market data provided, don't mention it - just provide intelligent analysis
         context = "\n".join(context_parts) if context_parts else ""
         
-        # Determine response language - ALWAYS prioritize query language over parameter
-        # Response language must match the prompt language, not the site setting
-        is_chinese_query = any('\u4e00' <= char <= '\u9fff' for char in user_query)
-        
-        # Check for Chinese punctuation as well
-        has_chinese_punctuation = any(char in user_query for char in '，。！？；：、')
-        
-        if is_chinese_query or has_chinese_punctuation:
-            # Query contains Chinese characters or punctuation - respond in Chinese
-            response_language = 'Chinese (Simplified)'
-        else:
-            # Query is in English (or other non-Chinese language) - respond in English
-            # IGNORE the language parameter - response must match prompt language
-            response_language = 'English'
+        # Always respond in English only
+        response_language = 'English'
         
         system_prompt = f"""You are a professional prediction market analyst specializing in Polymarket. Provide structured, data-driven insights with intelligent predictions.
 
-LANGUAGE REQUIREMENT: Respond in {response_language}. If the user writes in Chinese, respond in Chinese. If the user writes in English, respond in English. Always match the user's language preference.
+LANGUAGE REQUIREMENT: Always respond in English only, regardless of the user's query language.
 
 CRITICAL RULES - READ CAREFULLY:
 - **USE PROVIDED MARKET DATA WHEN AVAILABLE**: If market data is provided in the "Market data context" section, analyze it and base your insights on that actual data. The markets provided were found by searching Polymarket using the user's query.
@@ -252,25 +240,25 @@ CRITICAL RULES - READ CAREFULLY:
 - Explain your reasoning based on current events, trends, and market dynamics.
 
 Response Format (MUST FOLLOW):
-Use this exact structure with markdown formatting. Use Chinese headers if responding in Chinese, English headers if responding in English:
+Use this exact structure with markdown formatting. Always use English headers:
 
-**Key Metrics:** (or **关键指标:** in Chinese)
+**Key Metrics:**
 - List 3-5 key data points (volume, liquidity, probabilities, etc.) with specific numbers
-- Use bullet points with bold labels: **Label:** value (or **标签:** 值 in Chinese)
+- Use bullet points with bold labels: **Label:** value
 - **When showing time until resolution or time windows, you MUST calculate from the current date provided above. Show the calculation explicitly.**
 - Example: If current date is 2025-01-15 and event is June 2025, write: "Time Window: ~5 months (June 2025 - January 2025, from current date 2025-01-15)"
 - ALWAYS include specific candidate/choice probabilities if available in the market data (e.g., "Candidate A: 45%, Candidate B: 30%, Candidate C: 25%")
 
-**Market Assessment:** (or **市场评估:** in Chinese)
+**Market Assessment:**
 - 2-3 sentences summarizing the market's current state
 - Reference specific metrics from the data
 
-**Trading Considerations:** (or **交易考虑:** in Chinese)
+**Trading Considerations:**
 - Use numbered or bulleted list of key factors
 - Focus on actionable insights, not generic advice
 - Reference specific probabilities or patterns when available
 
-**Recommendation:** (or **建议:** in Chinese)
+**Recommendation:**
 - When asked "who will win?" or similar prediction questions, provide a specific prediction with reasoning
 - Name actual candidates, outcomes, or scenarios you think are most likely
 - Base predictions on current events, trends, historical patterns, and market dynamics
