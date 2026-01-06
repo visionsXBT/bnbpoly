@@ -25,6 +25,13 @@
   box-sizing: border-box;
 }
 
+.header-center {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
 .nav-button {
   padding: 10px 20px;
   background-color: #1a1a1a;
@@ -45,6 +52,17 @@
 
 .nav-button:active {
   transform: scale(0.98);
+}
+
+.nav-button.active {
+  background-color: #00FF00;
+  color: #000000;
+  cursor: default;
+}
+
+.nav-button.active:hover {
+  background-color: #00FF00;
+  color: #000000;
 }
 
 .logo-container {
@@ -332,6 +350,18 @@
     padding: 12px 16px;
     flex-wrap: wrap;
     gap: 10px;
+  }
+
+  .header-center {
+    order: 3;
+    width: 100%;
+    justify-content: center;
+    margin-top: 10px;
+  }
+
+  .header-nav {
+    order: 2;
+    margin-left: auto;
   }
 
   .nav-button {

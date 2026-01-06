@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import LandingPage from './components/LandingPage'
 import ChatApp from './components/ChatApp'
 import TradingDashboard from './components/TradingDashboard'
+import Terminal from './components/Terminal'
 
 function App() {
   // Always show landing page on first visit
@@ -26,6 +27,7 @@ function App() {
       <Routes>
         <Route path="/" element={<ChatApp />} />
         <Route path="/trading" element={<TradingDashboard />} />
+        <Route path="/terminal" element={<Terminal />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>

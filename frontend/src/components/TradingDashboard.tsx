@@ -338,10 +338,22 @@ function TradingDashboard() {
     <div className="trading-dashboard">
       <div className="dashboard-header">
         <div className="dashboard-header-left">
-          <button onClick={() => navigate('/')} className="back-button">
-            ← Back to Chat
+          <div className="logo-container">
+            <img src="/whisper.png" alt="Logo" className="logo" />
+            <span className="logo-text">POLYSCOUT</span>
+          </div>
+          <h1>Trading Dashboard</h1>
+        </div>
+        <div className="dashboard-header-nav">
+          <button onClick={() => navigate('/')} className="nav-button">
+            Chat
           </button>
-          <h1>POLYSCOUT Trading Dashboard</h1>
+          <button className="nav-button active">
+            Trade Bot
+          </button>
+          <button onClick={() => navigate('/terminal')} className="nav-button">
+            Terminal
+          </button>
         </div>
       </div>
 

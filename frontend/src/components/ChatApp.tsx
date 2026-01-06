@@ -197,12 +197,20 @@ function ChatApp() {
           <img src="/whisper.png" alt="Logo" className="logo" />
           <span className="logo-text">POLYSCOUT</span>
         </div>
+        <div className="header-center">
+          <LiveTradesRibbon apiBaseUrl={API_BASE_URL} />
+        </div>
         <div className="header-nav">
+          <button className="nav-button active">
+            Chat
+          </button>
           <button onClick={() => navigate('/trading')} className="nav-button">
-            Trading Dashboard
+            Trade Bot
+          </button>
+          <button onClick={() => navigate('/terminal')} className="nav-button">
+            Terminal
           </button>
         </div>
-        <LiveTradesRibbon apiBaseUrl={API_BASE_URL} />
       </div>
       <div className="app-layout">
         <div className="app">
