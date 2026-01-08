@@ -25,7 +25,7 @@ function ChatApp() {
   const [messages, setMessages] = useState<Message[]>([
     {
       role: 'assistant',
-      content: 'Welcome to POLYSCOUT. Your AI-powered Polymarket insights assistant. Ask me about markets, betting opportunities, or get analysis on specific predictions. How can I help you today?'
+      content: 'Welcome to POLYMAKER. Your AI-powered Polymarket insights assistant. Ask me about markets, betting opportunities, or get analysis on specific predictions. How can I help you today?'
     }
   ])
   const [isLoading, setIsLoading] = useState<boolean>(false)
@@ -195,7 +195,7 @@ function ChatApp() {
       <div className="header">
         <div className="logo-container">
           <img src="/whisper.png" alt="Logo" className="logo" />
-          <span className="logo-text">POLYSCOUT</span>
+          <span className="logo-text">POLYMAKER</span>
         </div>
         <div className="header-center">
           <LiveTradesRibbon apiBaseUrl={API_BASE_URL} />

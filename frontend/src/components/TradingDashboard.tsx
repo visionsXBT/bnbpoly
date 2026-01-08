@@ -297,7 +297,7 @@ function TradingDashboard() {
             <button onClick={() => navigate('/')} className="back-button">
               ← Back to Chat
             </button>
-            <h1>POLYSCOUT Trading Dashboard</h1>
+            <h1>POLYMAKER Trading Dashboard</h1>
           </div>
         </div>
         <div className="loading-state">
@@ -316,7 +316,7 @@ function TradingDashboard() {
             <button onClick={() => navigate('/')} className="back-button">
               ← Back to Chat
             </button>
-            <h1>POLYSCOUT Trading Dashboard</h1>
+            <h1>POLYMAKER Trading Dashboard</h1>
           </div>
         </div>
         <div className="error-state">
@@ -340,7 +340,7 @@ function TradingDashboard() {
         <div className="dashboard-header-left">
           <div className="logo-container">
             <img src="/whisper.png" alt="Logo" className="logo" />
-            <span className="logo-text">POLYSCOUT</span>
+            <span className="logo-text">POLYMAKER</span>
           </div>
           <h1>Trading Dashboard</h1>
         </div>
@@ -440,7 +440,7 @@ function TradingDashboard() {
                 <Line 
                   type="monotone" 
                   dataKey="netWorth" 
-                  stroke="#00FF00" 
+                  stroke="#1EA0FF" 
                   strokeWidth={2}
                   dot={false}
                   name="Net Worth"

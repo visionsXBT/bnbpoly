@@ -32,8 +32,8 @@
 .back-button {
   padding: 10px 20px;
   background-color: #1a1a1a;
-  color: #00FF00;
-  border: 1px solid #00FF00;
+  color: #1EA0FF;
+  border: 1px solid #1EA0FF;
   border-radius: 5px;
   cursor: pointer;
   font-size: 14px;
@@ -41,14 +41,14 @@
 }
 
 .back-button:hover {
-  background-color: #00FF00;
+  background-color: #1EA0FF;
   color: #0a0a0a;
 }
 
 .dashboard-header h1 {
   margin: 0;
   font-size: 28px;
-  color: #00FF00;
+  color: #1EA0FF;
 }
 
 .dashboard-header .logo-container {
@@ -64,7 +64,7 @@
 }
 
 .dashboard-header .logo-text {
-  color: #00FF00;
+  color: #1EA0FF;
   font-size: 28px;
   font-weight: 600;
 }
@@ -95,12 +95,12 @@
 }
 
 .trading-toggle.stopped {
-  background-color: #00FF00;
+  background-color: #1EA0FF;
   color: #0a0a0a;
 }
 
 .trading-toggle.stopped:hover {
-  background-color: #00CC00;
+  background-color: #0B7FD6;
 }
 
 .dashboard-stats {
@@ -133,7 +133,7 @@
 }
 
 .stat-value.profit {
-  color: #00FF00;
+  color: #1EA0FF;
 }
 
 .stat-value.loss {
@@ -157,7 +157,7 @@
 .dashboard-section h2 {
   margin: 0 0 20px 0;
   font-size: 20px;
-  color: #00FF00;
+  color: #1EA0FF;
   border-bottom: 1px solid #333;
   padding-bottom: 10px;
 }
@@ -182,7 +182,7 @@
 
 .position-card:hover,
 .trade-card:hover {
-  border-color: #00FF00;
+  border-color: #1EA0FF;
 }
 
 .position-header {
@@ -207,8 +207,8 @@
 }
 
 .position-pnl.profit {
-  color: #00FF00;
-  background-color: rgba(0, 255, 0, 0.1);
+  color: #1EA0FF;
+  background-color: rgba(30, 160, 255, 0.1);
 }
 
 .position-pnl.loss {
@@ -244,7 +244,7 @@
 }
 
 .detail-value.profit {
-  color: #00FF00;
+  color: #1EA0FF;
 }
 
 .detail-value.loss {
@@ -281,9 +281,9 @@
 }
 
 .trade-card.buy .trade-action {
-  background-color: rgba(0, 255, 0, 0.2);
-  color: #00FF00;
-  border: 1px solid #00FF00;
+  background-color: rgba(30, 160, 255, 0.2);
+  color: #1EA0FF;
+  border: 1px solid #1EA0FF;
 }
 
 .trade-card.sell .trade-action {
@@ -335,7 +335,7 @@
   width: 50px;
   height: 50px;
   border: 4px solid #333;
-  border-top-color: #00FF00;
+  border-top-color: #1EA0FF;
   border-radius: 50%;
   animation: spin 1s linear infinite;
   margin-bottom: 20px;
@@ -371,7 +371,7 @@
 }
 
 .market-analysis-card:hover {
-  border-color: #00FF00;
+  border-color: #1EA0FF;
 }
 
 .market-analysis-title {
@@ -404,7 +404,7 @@
 }
 
 .score-value.bullish {
-  color: #00FF00;
+  color: #1EA0FF;
 }
 
 .score-value.bearish {
@@ -436,7 +436,7 @@
 }
 
 .metric-value.up {
-  color: #00FF00;
+  color: #1EA0FF;
 }
 
 .metric-value.down {
@@ -463,7 +463,7 @@
 
 .positions-list::-webkit-scrollbar-thumb:hover,
 .trades-list::-webkit-scrollbar-thumb:hover {
-  background: #00FF00;
+  background: #1EA0FF;
 }
 
 @media (max-width: 1200px) {
@@ -483,7 +483,7 @@
 .pnl-chart-section h2 {
   margin: 0 0 20px 0;
   font-size: 20px;
-  color: #00FF00;
+  color: #1EA0FF;
   border-bottom: 1px solid #333;
   padding-bottom: 10px;
 }

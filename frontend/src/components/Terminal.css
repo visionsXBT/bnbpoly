@@ -33,7 +33,7 @@
   left: 0;
   width: 100%;
   height: 100%;
-  background-color: #4a6c3f;
+  background-color: #1E3A8A;
   mix-blend-mode: color;
   z-index: 0;
   pointer-events: none;
@@ -96,7 +96,7 @@
 .terminal-header {
   width: 100%;
   background: rgba(0, 0, 0, 0.8);
-  border-bottom: 1px solid #00FF00;
+  border-bottom: 1px solid #1EA0FF;
   padding: 12px 20px;
   display: flex;
   align-items: center;
@@ -124,7 +124,7 @@
 
 .terminal-card {
   background: rgba(0, 0, 0, 0.9);
-  border: 1px solid #00FF00;
+  border: 1px solid #1EA0FF;
   padding: 40px;
   max-width: 500px;
   width: 100%;
@@ -132,7 +132,7 @@
 }
 
 .terminal-title {
-  color: #00FF00;
+  color: #1EA0FF;
   font-size: 32px;
   font-weight: 600;
   margin-bottom: 20px;
@@ -160,7 +160,7 @@
 }
 
 .form-label {
-  color: #00FF00;
+  color: #1EA0FF;
   font-size: 14px;
   font-weight: 600;
   text-transform: uppercase;
@@ -168,7 +168,7 @@
 
 .form-input {
   padding: 12px 16px;
-  border: 1px solid #00FF00;
+  border: 1px solid #1EA0FF;
   background: #000000;
   color: #FFFFFF;
   font-size: 16px;
@@ -178,8 +178,8 @@
 }
 
 .form-input:focus {
-  border-color: #00FF00;
-  box-shadow: 0 0 8px rgba(0, 255, 0, 0.3);
+  border-color: #1EA0FF;
+  box-shadow: 0 0 8px rgba(30, 160, 255, 0.3);
 }
 
 .form-input:disabled {
@@ -194,8 +194,8 @@
 .submit-button {
   padding: 12px 24px;
   background: #1a1a1a;
-  color: #00FF00;
-  border: 1px solid #00FF00;
+  color: #1EA0FF;
+  border: 1px solid #1EA0FF;
   font-size: 16px;
   font-family: inherit;
   cursor: pointer;
@@ -205,7 +205,7 @@
 }
 
 .submit-button:hover:not(:disabled) {
-  background: #00FF00;
+  background: #1EA0FF;
   color: #000000;
 }
 
@@ -230,7 +230,7 @@
   width: 60px;
   height: 60px;
   border-radius: 50%;
-  background: #00FF00;
+  background: #1EA0FF;
   color: #000000;
   display: flex;
   align-items: center;

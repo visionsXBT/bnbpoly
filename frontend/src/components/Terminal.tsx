@@ -31,7 +31,7 @@ function Terminal() {
         <div className="terminal-header">
           <div className="logo-container">
             <img src="/whisper.png" alt="Logo" className="logo" />
-            <span className="logo-text">POLYSCOUT</span>
+            <span className="logo-text">POLYMAKER</span>
           </div>
           <div className="terminal-nav">
             <button onClick={() => navigate('/')} className="nav-button">
@@ -48,7 +48,7 @@ function Terminal() {
 
         <div className="terminal-main">
           <div className="terminal-card">
-            <h1 className="terminal-title">POLYSCOUT Terminal</h1>
+            <h1 className="terminal-title">POLYMAKER Terminal</h1>
             <p className="terminal-description">
               Deposit funds and execute autonomous trades directly on Polymarket. 
               Full trading capabilities coming soon - currently in beta development.
